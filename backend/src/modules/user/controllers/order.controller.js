@@ -7,11 +7,88 @@ import Coupon from '../../../models/Coupon.model.js';
 import Commission from '../../../models/Commission.model.js';
 import { generateOrderId } from '../../../utils/generateOrderId.js';
 import { generateTrackingNumber } from '../../../utils/generateTrackingNumber.js';
+import mongoose from 'mongoose';
+
+const normalizeVariantPart = (value) => String(value || '').trim().toLowerCase();
+
+const toVariantPriceEntries = (variantPrices) => {
+    if (!variantPrices) return [];
+    if (variantPrices instanceof Map) return Array.from(variantPrices.entries());
+    if (typeof variantPrices === 'object') return Object.entries(variantPrices);
+    return [];
+};
+
+const resolveVariantPrice = (product, selectedVariant) => {
+    const basePrice = Number(product?.price);
+    if (!Number.isFinite(basePrice)) {
+        throw new ApiError(400, `Invalid price configured for product ${product?.name || product?._id || ''}.`);
+    }
+
+    const size = normalizeVariantPart(selectedVariant?.size);
+    const color = normalizeVariantPart(selectedVariant?.color);
+    const entries = toVariantPriceEntries(product?.variants?.prices);
+    if (!entries.length || (!size && !color)) return basePrice;
+
+    const candidateKeys = [
+        `${size}|${color}`,
+        `${size}-${color}`,
+        `${size}_${color}`,
+        `${size}:${color}`,
+        size && !color ? size : null,
+        color && !size ? color : null,
+    ].filter(Boolean);
+
+    for (const candidate of candidateKeys) {
+        const exact = entries.find(([rawKey]) => String(rawKey).trim() === candidate);
+        if (exact) {
+            const price = Number(exact[1]);
+            if (Number.isFinite(price) && price >= 0) return price;
+        }
+
+        const normalized = entries.find(
+            ([rawKey]) => normalizeVariantPart(rawKey) === normalizeVariantPart(candidate)
+        );
+        if (normalized) {
+            const price = Number(normalized[1]);
+            if (Number.isFinite(price) && price >= 0) return price;
+        }
+    }
+
+    return basePrice;
+};
 
 // POST /api/user/orders
 export const placeOrder = asyncHandler(async (req, res) => {
     const { items, shippingAddress, paymentMethod, couponCode, shippingOption } = req.body;
+    const normalizedPaymentMethod = paymentMethod === 'cash' ? 'cod' : paymentMethod;
     const userId = req.user?.id || null;
+    const rawIdempotencyKey = String(req.get('x-idempotency-key') || '').trim();
+    const idempotencyKey = rawIdempotencyKey || null;
+    const normalizedGuestEmail = String(shippingAddress?.email || '').trim().toLowerCase();
+    const normalizedGuestPhone = String(shippingAddress?.phone || '').replace(/\D/g, '').slice(-10);
+    const idempotencyScope = userId
+        ? `user:${String(userId)}`
+        : `guest:${normalizedGuestEmail || normalizedGuestPhone || 'anonymous'}`;
+
+    if (idempotencyKey) {
+        const existingOrder = await Order.findOne({ idempotencyScope, idempotencyKey })
+            .select('orderId total trackingNumber')
+            .lean();
+        if (existingOrder) {
+            return res.status(200).json(
+                new ApiResponse(
+                    200,
+                    {
+                        orderId: existingOrder.orderId,
+                        total: existingOrder.total,
+                        trackingNumber: existingOrder.trackingNumber,
+                        idempotentReplay: true,
+                    },
+                    'Duplicate order request ignored. Returning existing order.'
+                )
+            );
+        }
+    }
 
     // 1. Validate items and calculate subtotal
     let subtotal = 0;
@@ -24,7 +101,8 @@ export const placeOrder = asyncHandler(async (req, res) => {
         if (product.stock === 'out_of_stock') throw new ApiError(400, `${product.name} is out of stock.`);
         if (product.stockQuantity < item.quantity) throw new ApiError(400, `Only ${product.stockQuantity} units of ${product.name} available.`);
 
-        const itemPrice = item.price || product.price;
+        // Always trust server-side product pricing; never trust client-sent item.price.
+        const itemPrice = resolveVariantPrice(product, item.variant);
         const itemSubtotal = itemPrice * item.quantity;
         subtotal += itemSubtotal;
 
@@ -85,54 +163,125 @@ export const placeOrder = asyncHandler(async (req, res) => {
         status: 'pending',
     }));
 
-    // 6. Create order
-    const order = await Order.create({
-        orderId: generateOrderId(),
-        userId,
-        items: enrichedItems,
-        vendorItems,
-        shippingAddress,
-        paymentMethod,
-        paymentStatus: paymentMethod === 'cash' ? 'pending' : 'paid',
-        subtotal,
-        shipping,
-        tax,
-        discount: couponDiscount,
-        total,
-        couponCode: couponCode?.toUpperCase(),
-        couponDiscount,
-        trackingNumber: generateTrackingNumber(),
-        estimatedDelivery: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000), // +5 days
-    });
+    // 6-9. Transactional order creation to avoid partial writes.
+    let order = null;
+    let idempotentReplay = false;
+    const session = await mongoose.startSession();
+    try {
+        await session.withTransaction(async () => {
+            if (idempotencyKey) {
+                const existingOrder = await Order.findOne({ idempotencyScope, idempotencyKey })
+                    .select('orderId total trackingNumber')
+                    .session(session);
+                if (existingOrder) {
+                    order = existingOrder;
+                    idempotentReplay = true;
+                    return;
+                }
+            }
 
-    // 7. Deduct stock
-    for (const item of enrichedItems) {
-        const product = await Product.findById(item.productId);
-        product.stockQuantity -= item.quantity;
-        if (product.stockQuantity <= 0) product.stock = 'out_of_stock';
-        else if (product.stockQuantity <= product.lowStockThreshold) product.stock = 'low_stock';
-        else product.stock = 'in_stock';
-        await product.save();
+            const [createdOrder] = await Order.create([{
+                orderId: generateOrderId(),
+                userId,
+                items: enrichedItems,
+                vendorItems,
+                shippingAddress,
+                paymentMethod: normalizedPaymentMethod,
+                // Keep every new order pending until gateway/webhook confirmation is implemented.
+                paymentStatus: 'pending',
+                subtotal,
+                shipping,
+                tax,
+                discount: couponDiscount,
+                total,
+                couponCode: couponCode?.toUpperCase(),
+                couponDiscount,
+                trackingNumber: generateTrackingNumber(),
+                estimatedDelivery: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000), // +5 days
+                idempotencyKey: idempotencyKey || undefined,
+                idempotencyScope: idempotencyKey ? idempotencyScope : undefined,
+            }], { session });
+            order = createdOrder;
+
+            // 7. Deduct stock atomically to prevent oversell under concurrent checkout.
+            for (const item of enrichedItems) {
+                const updatedProduct = await Product.findOneAndUpdate(
+                    {
+                        _id: item.productId,
+                        stock: { $ne: 'out_of_stock' },
+                        stockQuantity: { $gte: Number(item.quantity || 0) },
+                    },
+                    { $inc: { stockQuantity: -Number(item.quantity || 0) } },
+                    { new: true, session }
+                );
+
+                if (!updatedProduct) {
+                    throw new ApiError(409, `Insufficient stock while processing ${item.name}. Please refresh and try again.`);
+                }
+
+                const nextStockState =
+                    updatedProduct.stockQuantity <= 0
+                        ? 'out_of_stock'
+                        : (updatedProduct.stockQuantity <= updatedProduct.lowStockThreshold ? 'low_stock' : 'in_stock');
+
+                await Product.updateOne(
+                    { _id: updatedProduct._id },
+                    { $set: { stock: nextStockState } },
+                    { session }
+                );
+            }
+
+            // 8. Record commissions
+            const commissionDocs = Object.values(vendorMap).map((v) => ({
+                orderId: order._id,
+                vendorId: v.vendorId,
+                vendorName: v.vendorName,
+                subtotal: v.subtotal,
+                commissionRate: v.commissionRate,
+                commission: parseFloat(((v.subtotal * v.commissionRate) / 100).toFixed(2)),
+                vendorEarnings: parseFloat((v.subtotal - (v.subtotal * v.commissionRate) / 100).toFixed(2)),
+            }));
+            await Commission.insertMany(commissionDocs, { session });
+
+            // 9. Increment coupon usage
+            if (appliedCoupon) {
+                await Coupon.findByIdAndUpdate(appliedCoupon._id, { $inc: { usedCount: 1 } }, { session });
+            }
+        });
+    } catch (err) {
+        if (idempotencyKey && err?.code === 11000) {
+            const existingOrder = await Order.findOne({ idempotencyScope, idempotencyKey })
+                .select('orderId total trackingNumber')
+                .lean();
+            if (existingOrder) {
+                order = existingOrder;
+                idempotentReplay = true;
+            } else {
+                throw err;
+            }
+        } else {
+            throw err;
+        }
+    } finally {
+        await session.endSession();
     }
 
-    // 8. Record commissions
-    const commissionDocs = Object.values(vendorMap).map((v) => ({
-        orderId: order._id,
-        vendorId: v.vendorId,
-        vendorName: v.vendorName,
-        subtotal: v.subtotal,
-        commissionRate: v.commissionRate,
-        commission: parseFloat(((v.subtotal * v.commissionRate) / 100).toFixed(2)),
-        vendorEarnings: parseFloat((v.subtotal - (v.subtotal * v.commissionRate) / 100).toFixed(2)),
-    }));
-    await Commission.insertMany(commissionDocs);
-
-    // 9. Increment coupon usage
-    if (appliedCoupon) {
-        await Coupon.findByIdAndUpdate(appliedCoupon._id, { $inc: { usedCount: 1 } });
-    }
-
-    res.status(201).json(new ApiResponse(201, { orderId: order.orderId, total: order.total, trackingNumber: order.trackingNumber }, 'Order placed successfully.'));
+    const responseStatus = idempotentReplay ? 200 : 201;
+    const responseMessage = idempotentReplay
+        ? 'Duplicate order request ignored. Returning existing order.'
+        : 'Order placed successfully.';
+    res.status(responseStatus).json(
+        new ApiResponse(
+            responseStatus,
+            {
+                orderId: order.orderId,
+                total: order.total,
+                trackingNumber: order.trackingNumber,
+                ...(idempotentReplay ? { idempotentReplay: true } : {}),
+            },
+            responseMessage
+        )
+    );
 });
 
 // GET /api/user/orders

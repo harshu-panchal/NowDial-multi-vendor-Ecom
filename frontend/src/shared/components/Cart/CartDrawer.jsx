@@ -115,7 +115,7 @@ const CartDrawer = () => {
                         <div className="space-y-3 pl-2">
                           {vendorGroup.items.map((item, index) => (
                             <SwipeableCartItem
-                              key={item.id}
+                              key={item.cartLineKey || `${item.id}-${index}`}
                               item={item}
                               index={index}
                             />

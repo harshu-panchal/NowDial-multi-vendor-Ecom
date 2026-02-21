@@ -7,13 +7,14 @@ import Product from '../../../models/Product.model.js';
 
 // GET /api/admin/analytics/dashboard
 export const getDashboardStats = asyncHandler(async (req, res) => {
+    const activeOrderFilter = { isDeleted: { $ne: true } };
     const [totalOrders, totalUsers, totalVendors, totalProducts, revenueAgg, pendingOrders] = await Promise.all([
-        Order.countDocuments(),
+        Order.countDocuments(activeOrderFilter),
         User.countDocuments({ role: 'customer' }),
         Vendor.countDocuments({ status: 'approved' }),
         Product.countDocuments({ isActive: true }),
-        Order.aggregate([{ $match: { status: { $ne: 'cancelled' } } }, { $group: { _id: null, total: { $sum: '$total' } } }]),
-        Order.countDocuments({ status: 'pending' }),
+        Order.aggregate([{ $match: { ...activeOrderFilter, status: { $ne: 'cancelled' } } }, { $group: { _id: null, total: { $sum: '$total' } } }]),
+        Order.countDocuments({ ...activeOrderFilter, status: 'pending' }),
     ]);
 
     res.status(200).json(new ApiResponse(200, {
@@ -32,7 +33,7 @@ export const getRevenueData = asyncHandler(async (req, res) => {
     const groupFormat = period === 'daily' ? '%Y-%m-%d' : period === 'weekly' ? '%Y-%U' : '%Y-%m';
 
     const revenue = await Order.aggregate([
-        { $match: { status: { $ne: 'cancelled' } } },
+        { $match: { isDeleted: { $ne: true }, status: { $ne: 'cancelled' } } },
         { $group: { _id: { $dateToString: { format: groupFormat, date: '$createdAt' } }, revenue: { $sum: '$total' }, orders: { $sum: 1 } } },
         { $sort: { _id: -1 } },
         { $limit: 12 },
@@ -45,6 +46,7 @@ export const getRevenueData = asyncHandler(async (req, res) => {
 // GET /api/admin/analytics/order-status
 export const getOrderStatusBreakdown = asyncHandler(async (req, res) => {
     const breakdown = await Order.aggregate([
+        { $match: { isDeleted: { $ne: true } } },
         { $group: { _id: '$status', count: { $sum: 1 } } },
         { $sort: { count: -1 } },
     ]);
@@ -56,6 +58,7 @@ export const getOrderStatusBreakdown = asyncHandler(async (req, res) => {
 // GET /api/admin/analytics/top-products
 export const getTopProducts = asyncHandler(async (req, res) => {
     const topProducts = await Order.aggregate([
+        { $match: { isDeleted: { $ne: true } } },
         { $unwind: '$items' },
         { $group: { _id: '$items.productId', totalSold: { $sum: '$items.quantity' }, revenue: { $sum: { $multiply: ['$items.price', '$items.quantity'] } } } },
         { $sort: { totalSold: -1 } },
@@ -95,7 +98,7 @@ export const getCustomerGrowth = asyncHandler(async (req, res) => {
 
 // GET /api/admin/analytics/recent-orders
 export const getRecentOrders = asyncHandler(async (req, res) => {
-    const orders = await Order.find()
+    const orders = await Order.find({ isDeleted: { $ne: true } })
         .populate('userId', 'name email')
         .sort({ createdAt: -1 })
         .limit(5)
@@ -110,7 +113,7 @@ export const getSalesData = asyncHandler(async (req, res) => {
     const groupFormat = period === 'daily' ? '%Y-%m-%d' : period === 'weekly' ? '%Y-%U' : '%Y-%m';
 
     const sales = await Order.aggregate([
-        { $match: { status: { $ne: 'cancelled' } } },
+        { $match: { isDeleted: { $ne: true }, status: { $ne: 'cancelled' } } },
         { $group: { _id: { $dateToString: { format: groupFormat, date: '$createdAt' } }, sales: { $sum: '$total' }, orders: { $sum: 1 } } },
         { $sort: { _id: -1 } },
         { $limit: 12 },
@@ -126,7 +129,7 @@ export const getFinancialSummary = asyncHandler(async (req, res) => {
     const groupFormat = period === 'daily' ? '%Y-%m-%d' : period === 'weekly' ? '%Y-%U' : '%Y-%m';
 
     const summary = await Order.aggregate([
-        { $match: { status: { $ne: 'cancelled' } } },
+        { $match: { isDeleted: { $ne: true }, status: { $ne: 'cancelled' } } },
         {
             $group: {
                 _id: { $dateToString: { format: groupFormat, date: '$createdAt' } },

@@ -3,6 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import mongoSanitize from 'express-mongo-sanitize';
 import path from 'path';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 
 // Route imports
@@ -20,6 +21,24 @@ import notFound from './middlewares/notFound.js';
 const app = express();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const uploadsRoot = path.resolve(__dirname, '../uploads');
+const deliveryDocsRoot = path.resolve(uploadsRoot, 'delivery-docs');
+
+const isValidDeliveryDocToken = (relativePath, rawToken) => {
+    if (!rawToken) return false;
+    const [expRaw, providedSignature] = String(rawToken).split('.');
+    const exp = Number(expRaw);
+    if (!Number.isFinite(exp) || exp <= Date.now() || !providedSignature) return false;
+
+    const payload = `${relativePath}|${exp}`;
+    const expectedSignature = crypto
+        .createHmac('sha256', process.env.JWT_SECRET || 'delivery-doc-secret')
+        .update(payload)
+        .digest('hex');
+
+    if (providedSignature.length !== expectedSignature.length) return false;
+    return crypto.timingSafeEqual(Buffer.from(providedSignature), Buffer.from(expectedSignature));
+};
 
 // ─── Security Middleware ─────────────────────────────────────────────────────
 app.use(helmet());
@@ -58,7 +77,29 @@ app.get('/health', (req, res) => {
 });
 
 // ─── API Routes ──────────────────────────────────────────────────────────────
-app.use('/uploads', express.static(path.resolve(__dirname, '../uploads')));
+app.use(
+    '/uploads/delivery-docs',
+    (req, res, next) => {
+        const relativePath = `/uploads/delivery-docs${req.path}`;
+        const token = req.query.docToken;
+        if (!isValidDeliveryDocToken(relativePath, token)) {
+            return res.status(403).json({ success: false, message: 'Access denied.' });
+        }
+        next();
+    },
+    express.static(deliveryDocsRoot, { fallthrough: false })
+);
+
+app.use(
+    '/uploads',
+    (req, res, next) => {
+        if (req.path.startsWith('/delivery-docs/')) {
+            return res.status(403).json({ success: false, message: 'Access denied.' });
+        }
+        next();
+    },
+    express.static(uploadsRoot)
+);
 app.use('/api', publicRoutes);            // Public: products, categories, brands, coupons, banners
 app.use('/api/user', userRoutes);         // Customer: auth, addresses, wishlist, reviews, orders
 app.use('/api/admin', adminRoutes);       // Admin: auth, vendors, orders, catalog, analytics

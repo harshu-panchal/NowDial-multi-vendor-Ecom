@@ -1,7 +1,12 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
-import { getProductById as getCatalogProductById } from "../../modules/UserApp/data/catalogData";
 import toast from "react-hot-toast";
+
+const normalizeVariantPart = (value) => String(value || "").trim().toLowerCase();
+const getVariantSignature = (variant = {}) =>
+  `${normalizeVariantPart(variant?.size)}|${normalizeVariantPart(variant?.color)}`;
+const getCartLineKey = (id, variant = {}) =>
+  `${String(id)}::${getVariantSignature(variant)}`;
 
 // Cart Store
 export const useCartStore = create(
@@ -9,28 +14,24 @@ export const useCartStore = create(
     (set, get) => ({
       items: [],
       addItem: (item) => {
-        const product = getCatalogProductById(item.id);
-        if (!product) {
-          toast.error("Product not found");
-          return;
-        }
-
-        if (product.stock === "out_of_stock") {
+        const availableStock = Number(item?.stockQuantity);
+        if (Number.isFinite(availableStock) && availableStock <= 0) {
           toast.error("Product is out of stock");
           return;
         }
 
+        const lineKey = getCartLineKey(item.id, item.variant);
         const existingItem = get().items.find(
-          (i) => String(i.id) === String(item.id)
+          (i) => String(i.cartLineKey || getCartLineKey(i.id, i.variant)) === lineKey
         );
         const quantityToAdd = item.quantity || 1;
         const newQuantity = existingItem
           ? existingItem.quantity + quantityToAdd
           : quantityToAdd;
 
-        // Check stock limit
-        if (newQuantity > product.stockQuantity) {
-          toast.error(`Only ${product.stockQuantity} items available in stock`);
+        // If stock quantity is known on the item payload, keep local guard.
+        if (Number.isFinite(availableStock) && newQuantity > availableStock) {
+          toast.error(`Only ${availableStock} items available in stock`);
           return;
         }
 
@@ -41,8 +42,9 @@ export const useCartStore = create(
         // Include vendor information from product
         const itemWithVendor = {
           ...item,
-          vendorId: product.vendorId || item.vendorId || 1,
-          vendorName: product.vendorName || item.vendorName || "Unknown Vendor",
+          cartLineKey: lineKey,
+          vendorId: item.vendorId || 1,
+          vendorName: item.vendorName || "Unknown Vendor",
         };
 
         set((state) => {
@@ -50,10 +52,14 @@ export const useCartStore = create(
             return {
               items: state.items.map((i) =>
                 String(i.id) === String(item.id)
+                && String(i.cartLineKey || getCartLineKey(i.id, i.variant)) === lineKey
                   ? {
                     ...i,
                     ...itemWithVendor,
-                    quantity: Math.min(newQuantity, product.stockQuantity),
+                    quantity:
+                      Number.isFinite(availableStock)
+                        ? Math.min(newQuantity, availableStock)
+                        : newQuantity,
                   }
                   : i
               ),
@@ -64,42 +70,60 @@ export const useCartStore = create(
               ...state.items,
               {
                 ...itemWithVendor,
-                quantity: Math.min(quantityToAdd, product.stockQuantity),
+                quantity:
+                  Number.isFinite(availableStock)
+                    ? Math.min(quantityToAdd, availableStock)
+                    : quantityToAdd,
               },
             ],
           };
         });
 
-        if (
-          product.stock === "low_stock" &&
-          newQuantity >= product.stockQuantity * 0.8
-        ) {
-          toast.warning(`Only ${product.stockQuantity} left in stock!`);
+        if (Number.isFinite(availableStock) && newQuantity >= availableStock * 0.8) {
+          toast.warning(`Only ${availableStock} left in stock!`);
         }
 
         // Trigger cart animation
         const { triggerCartAnimation } = useUIStore.getState();
         triggerCartAnimation();
       },
-      removeItem: (id) =>
+      removeItem: (id, variant = null) =>
         set((state) => ({
-          items: state.items.filter((item) => String(item.id) !== String(id)),
+          items: state.items.filter((item) => {
+            if (String(item.id) !== String(id)) return true;
+            if (!variant) return false; // backwards-compatible: remove all variants for this product
+            const candidate = String(item.cartLineKey || getCartLineKey(item.id, item.variant));
+            return candidate !== getCartLineKey(id, variant);
+          }),
         })),
-      updateQuantity: (id, quantity) => {
+      updateQuantity: (id, quantity, variant = null) => {
         if (quantity <= 0) {
-          get().removeItem(id);
+          get().removeItem(id, variant);
           return;
         }
 
-        const product = getCatalogProductById(id);
-        if (product && quantity > product.stockQuantity) {
-          toast.error(`Only ${product.stockQuantity} items available in stock`);
-          quantity = product.stockQuantity;
+        const targetItem = get().items.find((item) => {
+          if (String(item.id) !== String(id)) return false;
+          if (!variant) return true;
+          const candidate = String(item.cartLineKey || getCartLineKey(item.id, item.variant));
+          return candidate === getCartLineKey(id, variant);
+        });
+        const availableStock = Number(targetItem?.stockQuantity);
+        if (Number.isFinite(availableStock) && quantity > availableStock) {
+          toast.error(`Only ${availableStock} items available in stock`);
+          quantity = availableStock;
         }
 
         set((state) => ({
           items: state.items.map((item) =>
-            String(item.id) === String(id) ? { ...item, quantity } : item
+            (() => {
+              if (String(item.id) !== String(id)) return item;
+              if (!variant) return { ...item, quantity };
+              const candidate = String(item.cartLineKey || getCartLineKey(item.id, item.variant));
+              return candidate === getCartLineKey(id, variant)
+                ? { ...item, quantity }
+                : item;
+            })()
           ),
         }));
       },

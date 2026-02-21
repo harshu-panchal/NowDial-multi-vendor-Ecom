@@ -43,13 +43,37 @@ const VariantSelector = ({ variants, onVariantChange, currentPrice }) => {
   };
 
   const getVariantPrice = () => {
-    if (!variants.prices || !selectedVariant) return currentPrice;
-    
-    if (selectedVariant.size && variants.prices[selectedVariant.size]) {
-      return variants.prices[selectedVariant.size];
-    }
-    if (selectedVariant.color && variants.prices[selectedVariant.color]) {
-      return variants.prices[selectedVariant.color];
+    if (!variants?.prices || !selectedVariant) return currentPrice;
+    const size = String(selectedVariant.size || "").trim().toLowerCase();
+    const color = String(selectedVariant.color || "").trim().toLowerCase();
+    const entries =
+      variants.prices instanceof Map
+        ? Array.from(variants.prices.entries())
+        : Object.entries(variants.prices || {});
+    if (!entries.length) return currentPrice;
+
+    const candidates = [
+      `${size}|${color}`,
+      `${size}-${color}`,
+      `${size}_${color}`,
+      `${size}:${color}`,
+      size && !color ? size : null,
+      color && !size ? color : null,
+    ].filter(Boolean);
+
+    for (const candidate of candidates) {
+      const exact = entries.find(([key]) => String(key).trim() === candidate);
+      if (exact) {
+        const parsed = Number(exact[1]);
+        if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+      }
+      const normalized = entries.find(
+        ([key]) => String(key).trim().toLowerCase() === candidate
+      );
+      if (normalized) {
+        const parsed = Number(normalized[1]);
+        if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+      }
     }
     return currentPrice;
   };

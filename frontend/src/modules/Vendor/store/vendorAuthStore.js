@@ -14,6 +14,7 @@ export const useVendorAuthStore = create(
     (set, get) => ({
       vendor: null,
       token: null,
+      refreshToken: null,
       isAuthenticated: false,
       isLoading: false,
 
@@ -28,20 +29,23 @@ export const useVendorAuthStore = create(
           const authData = response?.data || {};
           const vendor = authData.vendor;
           const accessToken = authData.accessToken;
+          const refreshToken = authData.refreshToken;
 
-          if (!vendor || !accessToken) {
+          if (!vendor || !accessToken || !refreshToken) {
             throw new Error("Invalid login response");
           }
 
           set({
             vendor,
             token: accessToken,
+            refreshToken,
             isAuthenticated: true,
             isLoading: false,
           });
 
           // Store token for vendor API requests
           localStorage.setItem("vendor-token", accessToken);
+          localStorage.setItem("vendor-refresh-token", refreshToken);
 
           return { success: true, vendor };
         } catch (error) {
@@ -114,12 +118,19 @@ export const useVendorAuthStore = create(
 
       // Vendor logout action
       logout: () => {
+        const refreshToken = localStorage.getItem("vendor-refresh-token");
+        if (refreshToken) {
+          api.post("/vendor/auth/logout", { refreshToken }).catch(() => {});
+        }
+
         set({
           vendor: null,
           token: null,
+          refreshToken: null,
           isAuthenticated: false,
         });
         localStorage.removeItem("vendor-token");
+        localStorage.removeItem("vendor-refresh-token");
       },
 
       // Update vendor profile — calls real PUT /vendor/auth/profile
@@ -150,11 +161,13 @@ export const useVendorAuthStore = create(
           const storedState = JSON.parse(
             localStorage.getItem("vendor-auth-storage") || "{}"
           );
+          const refreshToken = localStorage.getItem("vendor-refresh-token");
           const persistedVendor = storedState.state?.vendor || null;
           if (persistedVendor) {
             set({
               vendor: persistedVendor,
               token,
+              refreshToken: refreshToken || null,
               isAuthenticated: true,
               isLoading: false,
             });

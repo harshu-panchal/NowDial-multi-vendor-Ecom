@@ -2,10 +2,24 @@ import { useState, useEffect } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../store/authStore';
 
+const decodeJwtPayload = (token) => {
+  try {
+    const parts = String(token || '').split('.');
+    if (parts.length < 2) return null;
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const json = window.atob(base64);
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+};
+
 const ProtectedRoute = ({ children }) => {
-  const { isAuthenticated } = useAuthStore();
+  const { isAuthenticated, user, token } = useAuthStore();
   const location = useLocation();
   const [isDesktop, setIsDesktop] = useState(false);
+  const tokenPayload = decodeJwtPayload(token || localStorage.getItem('token'));
+  const resolvedRole = String(user?.role || tokenPayload?.role || '').toLowerCase();
 
   // Check if screen is desktop (≥1024px)
   useEffect(() => {
@@ -39,6 +53,12 @@ const ProtectedRoute = ({ children }) => {
     }
     
     // Default redirect to desktop login
+    return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  if (resolvedRole && resolvedRole !== 'customer') {
+    localStorage.removeItem('token');
+    localStorage.removeItem('auth-storage');
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 

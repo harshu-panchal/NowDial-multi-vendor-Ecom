@@ -5,11 +5,30 @@ import { ApiResponse } from '../../../utils/ApiResponse.js';
 import { asyncHandler } from '../../../utils/asyncHandler.js';
 import { sendEmail } from '../../../services/email.service.js';
 import { createNotification } from '../../../services/notification.service.js';
+import crypto from 'crypto';
+
+const DOC_TOKEN_TTL_MS = 10 * 60 * 1000;
+const DOC_TOKEN_QUERY_KEY = 'docToken';
+
+const buildDocToken = (relativePath) => {
+    const exp = Date.now() + DOC_TOKEN_TTL_MS;
+    const payload = `${relativePath}|${exp}`;
+    const signature = crypto
+        .createHmac('sha256', process.env.JWT_SECRET || 'delivery-doc-secret')
+        .update(payload)
+        .digest('hex');
+    return `${exp}.${signature}`;
+};
 
 const buildDocUrl = (req, relativePath = '') => {
     if (!relativePath) return '';
     if (relativePath.startsWith('http://') || relativePath.startsWith('https://')) return relativePath;
-    return `${req.protocol}://${req.get('host')}${relativePath}`;
+    const baseUrl = `${req.protocol}://${req.get('host')}${relativePath}`;
+    if (relativePath.startsWith('/uploads/delivery-docs/')) {
+        const token = buildDocToken(relativePath);
+        return `${baseUrl}?${DOC_TOKEN_QUERY_KEY}=${encodeURIComponent(token)}`;
+    }
+    return baseUrl;
 };
 
 /**
@@ -64,7 +83,7 @@ export const getAllDeliveryBoys = asyncHandler(async (req, res) => {
                                 {
                                     $and: [
                                         { $eq: ['$status', 'delivered'] },
-                                        { $eq: ['$paymentMethod', 'cod'] },
+                                        { $in: ['$paymentMethod', ['cod', 'cash']] },
                                         { $ne: ['$isCashSettled', true] }
                                     ]
                                 },
@@ -139,7 +158,7 @@ export const getDeliveryBoyById = asyncHandler(async (req, res) => {
                             {
                                 $and: [
                                     { $eq: ['$status', 'delivered'] },
-                                    { $eq: ['$paymentMethod', 'cod'] },
+                                    { $in: ['$paymentMethod', ['cod', 'cash']] },
                                     { $ne: ['$isCashSettled', true] }
                                 ]
                             },
@@ -372,7 +391,7 @@ export const settleCash = asyncHandler(async (req, res) => {
         {
             deliveryBoyId: req.params.id,
             status: 'delivered',
-            paymentMethod: 'cod',
+            paymentMethod: { $in: ['cod', 'cash'] },
             isCashSettled: { $ne: true }
         },
         {

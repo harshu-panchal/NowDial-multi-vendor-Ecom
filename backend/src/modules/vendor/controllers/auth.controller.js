@@ -7,6 +7,12 @@ import { generateTokens } from '../../../utils/generateToken.js';
 import { sendOTP } from '../../../services/otp.service.js';
 import { createNotification } from '../../../services/notification.service.js';
 import { sendEmail } from '../../../services/email.service.js';
+import {
+    clearRefreshSession,
+    decodeRefreshTokenOrThrow,
+    persistRefreshSession,
+    rotateRefreshSession,
+} from '../../../services/refreshToken.service.js';
 
 // POST /api/vendor/auth/register
 export const register = asyncHandler(async (req, res) => {
@@ -151,6 +157,8 @@ export const resetPassword = asyncHandler(async (req, res) => {
     vendor.resetOtp = undefined;
     vendor.resetOtpExpiry = undefined;
     vendor.resetOtpVerified = false;
+    vendor.refreshTokenHash = undefined;
+    vendor.refreshTokenExpiresAt = undefined;
     await vendor.save();
 
     return res.status(200).json(new ApiResponse(200, null, 'Password reset successful. Please login.'));
@@ -171,7 +179,47 @@ export const login = asyncHandler(async (req, res) => {
     if (!isMatch) throw new ApiError(401, 'Invalid credentials.');
 
     const { accessToken, refreshToken } = generateTokens({ id: vendor._id, role: 'vendor', email: vendor.email });
+    await persistRefreshSession(vendor, refreshToken);
     res.status(200).json(new ApiResponse(200, { accessToken, refreshToken, vendor: { id: vendor._id, name: vendor.name, storeName: vendor.storeName, email: vendor.email, storeLogo: vendor.storeLogo } }, 'Login successful.'));
+});
+
+// POST /api/vendor/auth/refresh
+export const refresh = asyncHandler(async (req, res) => {
+    const { refreshToken } = req.body;
+    const decoded = decodeRefreshTokenOrThrow(refreshToken);
+    const vendor = await Vendor.findById(decoded.id).select('+refreshTokenHash +refreshTokenExpiresAt status isVerified suspensionReason');
+
+    if (!vendor) throw new ApiError(401, 'Invalid refresh token.');
+    if (!vendor.isVerified) throw new ApiError(403, 'Please verify your email first.');
+    if (vendor.status === 'pending') throw new ApiError(403, 'Your account is pending admin approval.');
+    if (vendor.status === 'suspended') throw new ApiError(403, `Your account has been suspended. Reason: ${vendor.suspensionReason || 'Contact support.'}`);
+    if (vendor.status === 'rejected') throw new ApiError(403, 'Your vendor application was rejected.');
+
+    const tokens = await rotateRefreshSession(
+        vendor,
+        { id: vendor._id, role: 'vendor', email: vendor.email },
+        refreshToken
+    );
+
+    return res.status(200).json(new ApiResponse(200, tokens, 'Session refreshed successfully.'));
+});
+
+// POST /api/vendor/auth/logout
+export const logout = asyncHandler(async (req, res) => {
+    const { refreshToken } = req.body;
+    if (refreshToken) {
+        try {
+            const decoded = decodeRefreshTokenOrThrow(refreshToken);
+            const vendor = await Vendor.findById(decoded.id).select('+refreshTokenHash +refreshTokenExpiresAt');
+            if (vendor?.refreshTokenHash) {
+                await clearRefreshSession(vendor);
+            }
+        } catch {
+            // Keep logout idempotent.
+        }
+    }
+
+    return res.status(200).json(new ApiResponse(200, null, 'Logged out successfully.'));
 });
 
 // GET /api/vendor/auth/profile

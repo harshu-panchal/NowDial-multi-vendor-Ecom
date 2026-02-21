@@ -37,12 +37,12 @@ const SwipeableCartItem = ({ item, index }) => {
         return product ? product.stock === "low_stock" : false;
     };
 
-    const handleQuantityChange = (id, currentQuantity, change) => {
+    const handleQuantityChange = (id, currentQuantity, change, variant) => {
         const product = getProductById(id);
         const newQuantity = currentQuantity + change;
 
         if (newQuantity <= 0) {
-            removeItem(id);
+            removeItem(id, variant);
             return;
         }
 
@@ -51,7 +51,7 @@ const SwipeableCartItem = ({ item, index }) => {
             return;
         }
 
-        updateQuantity(id, newQuantity);
+        updateQuantity(id, newQuantity, variant);
     };
 
     const handleSaveForLater = (item) => {
@@ -61,14 +61,14 @@ const SwipeableCartItem = ({ item, index }) => {
             price: item.price,
             image: item.image,
         });
-        removeItem(item.id);
+        removeItem(item.id, item.variant);
         toast.success("Saved for later!");
     };
 
     const handleSwipeRight = () => {
         setIsDeleted(true);
         deletedItemRef.current = { ...item };
-        removeItem(item.id);
+        removeItem(item.id, item.variant);
         toast.success("Item removed", {
             duration: 3000,
             action: {
@@ -157,7 +157,7 @@ const SwipeableCartItem = ({ item, index }) => {
                             onClick={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
-                                handleQuantityChange(item.id, item.quantity, -1);
+                                handleQuantityChange(item.id, item.quantity, -1, item.variant);
                             }}
                             className="w-8 h-8 flex items-center justify-center rounded-lg bg-white border border-gray-300 hover:bg-gray-50 transition-colors">
                             <FiMinus className="text-xs text-gray-600" />
@@ -176,7 +176,7 @@ const SwipeableCartItem = ({ item, index }) => {
                             onClick={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
-                                handleQuantityChange(item.id, item.quantity, 1);
+                                handleQuantityChange(item.id, item.quantity, 1, item.variant);
                             }}
                             disabled={isMaxQuantity(item.id, item.quantity)}
                             className={`w-8 h-8 flex items-center justify-center rounded-lg border transition-colors ${isMaxQuantity(item.id, item.quantity)
@@ -190,7 +190,7 @@ const SwipeableCartItem = ({ item, index }) => {
                             onClick={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
-                                removeItem(item.id);
+                                removeItem(item.id, item.variant);
                             }}
                             className="ml-auto p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors">
                             <FiTrash2 className="text-sm" />

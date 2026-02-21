@@ -4,6 +4,7 @@ import ApiError from '../../../utils/ApiError.js';
 import Order from '../../../models/Order.model.js';
 import DeliveryBoy from '../../../models/DeliveryBoy.model.js';
 import User from '../../../models/User.model.js';
+import { createNotification } from '../../../services/notification.service.js';
 
 // GET /api/admin/orders
 export const getAllOrders = asyncHandler(async (req, res) => {
@@ -11,7 +12,7 @@ export const getAllOrders = asyncHandler(async (req, res) => {
     const numericPage = Number(page) || 1;
     const numericLimit = Number(limit) || 20;
     const skip = (numericPage - 1) * numericLimit;
-    const filter = {};
+    const filter = { isDeleted: { $ne: true } };
 
     if (status && status !== 'all') filter.status = status;
     if (search) {
@@ -61,7 +62,10 @@ export const getAllOrders = asyncHandler(async (req, res) => {
 
 // GET /api/admin/orders/:id
 export const getOrderById = asyncHandler(async (req, res) => {
-    const order = await Order.findOne({ $or: [{ orderId: req.params.id }, { _id: req.params.id.match(/^[0-9a-fA-F]{24}$/) ? req.params.id : null }] })
+    const order = await Order.findOne({
+        $or: [{ orderId: req.params.id }, { _id: req.params.id.match(/^[0-9a-fA-F]{24}$/) ? req.params.id : null }],
+        isDeleted: { $ne: true },
+    })
         .populate('userId', 'name email phone')
         .populate('deliveryBoyId', 'name phone email vehicleType vehicleNumber')
         .populate('items.productId', 'name images price')
@@ -89,7 +93,10 @@ export const updateOrderStatus = asyncHandler(async (req, res) => {
     }
 
     const order = await Order.findOneAndUpdate(
-        { $or: [{ orderId: req.params.id }, { _id: req.params.id.match(/^[0-9a-fA-F]{24}$/) ? req.params.id : null }] },
+        {
+            $or: [{ orderId: req.params.id }, { _id: req.params.id.match(/^[0-9a-fA-F]{24}$/) ? req.params.id : null }],
+            isDeleted: { $ne: true },
+        },
         update,
         { new: true }
     ).populate('userId', 'name email');
@@ -101,23 +108,65 @@ export const updateOrderStatus = asyncHandler(async (req, res) => {
 // PATCH /api/admin/orders/:id/assign-delivery
 export const assignDeliveryBoy = asyncHandler(async (req, res) => {
     const { deliveryBoyId } = req.body;
-    const deliveryBoy = await DeliveryBoy.findById(deliveryBoyId);
-    if (!deliveryBoy) throw new ApiError(404, 'Delivery boy not found.');
+    if (!deliveryBoyId) throw new ApiError(400, 'deliveryBoyId is required.');
 
-    const order = await Order.findOneAndUpdate(
-        { $or: [{ orderId: req.params.id }, { _id: req.params.id.match(/^[0-9a-fA-F]{24}$/) ? req.params.id : null }] },
-        { deliveryBoyId, status: 'processing' },
-        { new: true }
-    );
+    const deliveryBoy = await DeliveryBoy.findById(deliveryBoyId).select('name isActive applicationStatus');
+    if (!deliveryBoy) throw new ApiError(404, 'Delivery boy not found.');
+    if (!deliveryBoy.isActive) throw new ApiError(400, 'Delivery boy is inactive.');
+    if (deliveryBoy.applicationStatus !== 'approved') {
+        throw new ApiError(400, 'Delivery boy is not approved.');
+    }
+
+    const filter = {
+        $or: [{ orderId: req.params.id }, { _id: req.params.id.match(/^[0-9a-fA-F]{24}$/) ? req.params.id : null }],
+        isDeleted: { $ne: true },
+    };
+    const order = await Order.findOne(filter);
     if (!order) throw new ApiError(404, 'Order not found.');
+
+    if (['cancelled', 'returned', 'delivered'].includes(String(order.status))) {
+        throw new ApiError(409, `Cannot assign delivery for ${order.status} order.`);
+    }
+
+    const previousDeliveryBoyId = order.deliveryBoyId ? String(order.deliveryBoyId) : '';
+    const isReassigned = previousDeliveryBoyId && previousDeliveryBoyId !== String(deliveryBoyId);
+
+    order.deliveryBoyId = deliveryBoyId;
+    if (order.status === 'pending') {
+        order.status = 'processing';
+    }
+    await order.save();
+
+    await createNotification({
+        recipientId: deliveryBoy._id,
+        recipientType: 'delivery',
+        title: isReassigned ? 'Order reassigned' : 'New order assigned',
+        message: `${order.orderId} has been ${isReassigned ? 'reassigned to you' : 'assigned to you'}.`,
+        type: 'order',
+        data: {
+            orderId: String(order.orderId),
+            reassigned: isReassigned ? 'true' : 'false',
+            assignedAt: new Date().toISOString(),
+        },
+    });
+
     res.status(200).json(new ApiResponse(200, order, 'Delivery boy assigned.'));
 });
 
 // DELETE /api/admin/orders/:id
 export const deleteOrder = asyncHandler(async (req, res) => {
-    const order = await Order.findOneAndDelete(
-        { $or: [{ orderId: req.params.id }, { _id: req.params.id.match(/^[0-9a-fA-F]{24}$/) ? req.params.id : null }] }
+    const order = await Order.findOneAndUpdate(
+        {
+            $or: [{ orderId: req.params.id }, { _id: req.params.id.match(/^[0-9a-fA-F]{24}$/) ? req.params.id : null }],
+            isDeleted: { $ne: true },
+        },
+        {
+            isDeleted: true,
+            deletedAt: new Date(),
+            deletedBy: req.user?.id || null,
+        },
+        { new: true }
     );
     if (!order) throw new ApiError(404, 'Order not found.');
-    res.status(200).json(new ApiResponse(200, null, 'Order deleted.'));
+    res.status(200).json(new ApiResponse(200, null, 'Order archived.'));
 });

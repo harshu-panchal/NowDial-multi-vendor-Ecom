@@ -31,6 +31,44 @@ import PageTransition from "../../../shared/components/PageTransition";
 import Badge from "../../../shared/components/Badge";
 import ProductCard from "../../../shared/components/ProductCard";
 
+const resolveVariantPrice = (product, selectedVariant) => {
+  const basePrice = Number(product?.price) || 0;
+  if (!selectedVariant || !product?.variants?.prices) return basePrice;
+
+  const size = String(selectedVariant.size || "").trim().toLowerCase();
+  const color = String(selectedVariant.color || "").trim().toLowerCase();
+  const entries =
+    product.variants.prices instanceof Map
+      ? Array.from(product.variants.prices.entries())
+      : Object.entries(product.variants.prices || {});
+
+  const candidates = [
+    `${size}|${color}`,
+    `${size}-${color}`,
+    `${size}_${color}`,
+    `${size}:${color}`,
+    size && !color ? size : null,
+    color && !size ? color : null,
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    const exact = entries.find(([key]) => String(key).trim() === candidate);
+    if (exact) {
+      const parsed = Number(exact[1]);
+      if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+    }
+    const normalized = entries.find(
+      ([key]) => String(key).trim().toLowerCase() === candidate
+    );
+    if (normalized) {
+      const parsed = Number(normalized[1]);
+      if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+    }
+  }
+
+  return basePrice;
+};
+
 const MobileProductDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -94,20 +132,7 @@ const MobileProductDetail = () => {
       return;
     }
 
-    let finalPrice = product.price;
-    if (selectedVariant && product.variants?.prices) {
-      if (
-        selectedVariant.size &&
-        product.variants.prices[selectedVariant.size]
-      ) {
-        finalPrice = product.variants.prices[selectedVariant.size];
-      } else if (
-        selectedVariant.color &&
-        product.variants.prices[selectedVariant.color]
-      ) {
-        finalPrice = product.variants.prices[selectedVariant.color];
-      }
-    }
+    const finalPrice = resolveVariantPrice(product, selectedVariant);
 
     addItem({
       id: product.id,
@@ -163,26 +188,22 @@ const MobileProductDetail = () => {
   }, [product]);
 
   const currentPrice = useMemo(() => {
-    if (selectedVariant && product.variants?.prices) {
-      if (
-        selectedVariant.size &&
-        product.variants.prices[selectedVariant.size]
-      ) {
-        return product.variants.prices[selectedVariant.size];
-      }
-      if (
-        selectedVariant.color &&
-        product.variants.prices[selectedVariant.color]
-      ) {
-        return product.variants.prices[selectedVariant.color];
-      }
-    }
-    return product.price;
+    return resolveVariantPrice(product, selectedVariant);
   }, [product, selectedVariant]);
 
   const similarProducts = useMemo(() => {
     return getSimilarProducts(product.id, 5);
   }, [product?.id]);
+
+  const productFaqs = useMemo(() => {
+    if (!Array.isArray(product?.faqs)) return [];
+    return product.faqs
+      .map((faq) => ({
+        question: String(faq?.question || "").trim(),
+        answer: String(faq?.answer || "").trim(),
+      }))
+      .filter((faq) => faq.question && faq.answer);
+  }, [product?.faqs]);
 
   return (
     <PageTransition>
@@ -431,6 +452,30 @@ const MobileProductDetail = () => {
                     </p>
                   </div>
                 </div>
+
+                {/* FAQs */}
+                {productFaqs.length > 0 && (
+                  <div className="pt-6">
+                    <h3 className="text-lg font-bold text-gray-900 mb-4">
+                      Product FAQs
+                    </h3>
+                    <div className="space-y-3">
+                      {productFaqs.map((faq, index) => (
+                        <div
+                          key={`${faq.question}-${index}`}
+                          className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm"
+                        >
+                          <p className="text-sm font-bold text-gray-800 mb-2">
+                            {faq.question}
+                          </p>
+                          <p className="text-sm text-gray-600 leading-relaxed">
+                            {faq.answer}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {/* Reviews List */}
                 {productReviews.length > 0 && (

@@ -7,6 +7,7 @@ export const useAuthStore = create(
     (set, get) => ({
       user: null,
       token: null,
+      refreshToken: null,
       isAuthenticated: false,
       isLoading: false,
       pendingEmail: null,
@@ -19,21 +20,24 @@ export const useAuthStore = create(
           const response = await api.post('/user/auth/login', { email: normalizedEmail, password });
           const payload = response?.data ?? response;
           const accessToken = payload?.accessToken;
+          const refreshToken = payload?.refreshToken;
           const user = payload?.user;
 
-          if (!accessToken || !user) {
+          if (!accessToken || !refreshToken || !user) {
             throw new Error('Invalid login response from server.');
           }
 
           set({
             user,
             token: accessToken,
+            refreshToken,
             isAuthenticated: true,
             pendingEmail: null,
             isLoading: false,
           });
 
           localStorage.setItem('token', accessToken);
+          localStorage.setItem('refresh-token', refreshToken);
 
           return { success: true, user };
         } catch (error) {
@@ -72,12 +76,14 @@ export const useAuthStore = create(
           set({
             user: null,
             token: null,
+            refreshToken: null,
             isAuthenticated: false,
             pendingEmail: email,
             isLoading: false,
           });
 
           localStorage.removeItem('token');
+          localStorage.removeItem('refresh-token');
 
           return { success: true, email };
         } catch (error) {
@@ -94,21 +100,24 @@ export const useAuthStore = create(
           const response = await api.post('/user/auth/verify-otp', { email: normalizedEmail, otp });
           const payload = response?.data ?? response;
           const accessToken = payload?.accessToken;
+          const refreshToken = payload?.refreshToken;
           const user = payload?.user;
 
-          if (!accessToken || !user) {
+          if (!accessToken || !refreshToken || !user) {
             throw new Error('Invalid OTP verification response from server.');
           }
 
           set({
             user,
             token: accessToken,
+            refreshToken,
             isAuthenticated: true,
             pendingEmail: null,
             isLoading: false,
           });
 
           localStorage.setItem('token', accessToken);
+          localStorage.setItem('refresh-token', refreshToken);
           return { success: true, user };
         } catch (error) {
           set({ isLoading: false });
@@ -171,13 +180,20 @@ export const useAuthStore = create(
 
       // Logout action
       logout: () => {
+        const refreshToken = localStorage.getItem('refresh-token');
+        if (refreshToken) {
+          api.post('/user/auth/logout', { refreshToken }).catch(() => {});
+        }
+
         set({
           user: null,
           token: null,
+          refreshToken: null,
           isAuthenticated: false,
           pendingEmail: null,
         });
         localStorage.removeItem('token');
+        localStorage.removeItem('refresh-token');
       },
 
       // Update user profile
@@ -264,10 +280,12 @@ export const useAuthStore = create(
         const token = localStorage.getItem('token');
         if (token) {
           const storedState = JSON.parse(localStorage.getItem('auth-storage') || '{}');
+          const refreshToken = localStorage.getItem('refresh-token');
           if (storedState.state?.user) {
             set({
               user: storedState.state.user,
               token,
+              refreshToken: refreshToken || null,
               isAuthenticated: true,
             });
           }

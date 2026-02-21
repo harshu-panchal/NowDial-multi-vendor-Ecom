@@ -24,6 +24,14 @@ export const verifyResetOtpSchema = Joi.object({
     otp: Joi.string().pattern(/^\d{6}$/).required(),
 });
 
+export const refreshTokenSchema = Joi.object({
+    refreshToken: Joi.string().required(),
+});
+
+export const logoutSchema = Joi.object({
+    refreshToken: Joi.string().allow('').optional(),
+});
+
 export const resetPasswordSchema = Joi.object({
     email: Joi.string().email().lowercase().required(),
     password: Joi.string().min(6).required(),

@@ -14,15 +14,19 @@ import * as marketingController from '../controllers/marketing.controller.js';
 import * as notificationController from '../controllers/notification.controller.js';
 import * as uploadController from '../controllers/upload.controller.js';
 import { authenticate } from '../../../middlewares/authenticate.js';
-import { authorize } from '../../../middlewares/authorize.js';
+import { authorize, enforceAccountStatus } from '../../../middlewares/authorize.js';
 import { authLimiter } from '../../../middlewares/rateLimiter.js';
+import { validate } from '../../../middlewares/validate.js';
 import { uploadSingle } from '../../../middlewares/upload.js';
+import { refreshTokenSchema, logoutSchema } from '../validators/auth.validator.js';
 
 const router = Router();
-const adminAuth = [authenticate, authorize('admin', 'superadmin')];
+const adminAuth = [authenticate, authorize('admin', 'superadmin'), enforceAccountStatus];
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 router.post('/auth/login', authLimiter, authController.login);
+router.post('/auth/refresh', validate(refreshTokenSchema), authController.refresh);
+router.post('/auth/logout', validate(logoutSchema), authController.logout);
 router.get('/auth/profile', ...adminAuth, authController.getProfile);
 
 // ─── Analytics ────────────────────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { FiSave, FiX, FiUpload } from "react-icons/fi";
 import { motion } from "framer-motion";
@@ -10,6 +10,13 @@ import { uploadVendorImage, uploadVendorImages } from "../../services/vendorServ
 import CategorySelector from "../../../Admin/components/CategorySelector";
 import AnimatedSelect from "../../../Admin/components/AnimatedSelect";
 import toast from "react-hot-toast";
+import {
+  parseVariantAxis,
+  buildVariantCombinations,
+  syncVariantPricesWithAxes,
+  buildVariantPayload,
+  normalizeVariantStateForForm,
+} from "../../utils/variantHelpers";
 
 const ProductForm = () => {
   const navigate = useNavigate();
@@ -61,8 +68,13 @@ const ProductForm = () => {
     seoTitle: "",
     seoDescription: "",
     relatedProducts: [],
+    faqs: [],
   });
   const [isUploadingMedia, setIsUploadingMedia] = useState(false);
+  const variantCombinations = useMemo(
+    () => buildVariantCombinations(formData.variants?.sizes || [], formData.variants?.colors || []),
+    [formData.variants?.sizes, formData.variants?.colors]
+  );
 
   const normalizeId = (value) => {
     if (!value) return null;
@@ -110,6 +122,11 @@ const ProductForm = () => {
     const normalizedParentCategoryId = normalizeId(category?.parentId);
     const isSubcategory = Boolean(normalizedParentCategoryId);
 
+    const normalizedVariants = normalizeVariantStateForForm(
+      product.variants || {},
+      product.price
+    );
+
     setFormData({
       name: product.name || "",
       unit: product.unit || "",
@@ -141,16 +158,11 @@ const ProductForm = () => {
       taxIncluded: product.taxIncluded || false,
       description: product.description || "",
       tags: product.tags || [],
-      variants: {
-        sizes: product.variants?.sizes || [],
-        colors: product.variants?.colors || [],
-        materials: product.variants?.materials || [],
-        prices: product.variants?.prices || {},
-        defaultVariant: product.variants?.defaultVariant || {},
-      },
+      variants: normalizedVariants,
       seoTitle: product.seoTitle || "",
       seoDescription: product.seoDescription || "",
       relatedProducts: product.relatedProducts || [],
+      faqs: Array.isArray(product.faqs) ? product.faqs : [],
     });
   };
 
@@ -237,6 +249,57 @@ const ProductForm = () => {
     });
   };
 
+  const handleFaqChange = (index, field, value) => {
+    setFormData((prev) => {
+      const nextFaqs = [...(prev.faqs || [])];
+      nextFaqs[index] = {
+        ...(nextFaqs[index] || { question: "", answer: "" }),
+        [field]: value,
+      };
+      return { ...prev, faqs: nextFaqs };
+    });
+  };
+
+  const addFaq = () => {
+    setFormData((prev) => ({
+      ...prev,
+      faqs: [...(prev.faqs || []), { question: "", answer: "" }],
+    }));
+  };
+
+  const removeFaq = (index) => {
+    setFormData((prev) => ({
+      ...prev,
+      faqs: (prev.faqs || []).filter((_, i) => i !== index),
+    }));
+  };
+
+  const updateVariantAxes = (axis, rawText) => {
+    const parsed = parseVariantAxis(rawText);
+    const nextSizes = axis === "sizes" ? parsed : (formData.variants?.sizes || []);
+    const nextColors = axis === "colors" ? parsed : (formData.variants?.colors || []);
+    const syncedPrices = syncVariantPricesWithAxes(
+      formData.variants?.prices || {},
+      nextSizes,
+      nextColors,
+      formData.price
+    );
+
+    setFormData((prev) => ({
+      ...prev,
+      variants: {
+        ...prev.variants,
+        sizes: nextSizes,
+        colors: nextColors,
+        prices: syncedPrices,
+        defaultVariant: {
+          size: String(prev.variants?.defaultVariant?.size || ""),
+          color: String(prev.variants?.defaultVariant?.color || ""),
+        },
+      },
+    }));
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
 
@@ -269,6 +332,16 @@ const ProductForm = () => {
       return;
     }
 
+    const hasInvalidFaq = (formData.faqs || []).some((faq) => {
+      const question = String(faq?.question || "").trim();
+      const answer = String(faq?.answer || "").trim();
+      return (question && !answer) || (!question && answer);
+    });
+    if (hasInvalidFaq) {
+      toast.error("Each FAQ must have both question and answer");
+      return;
+    }
+
     const payload = {
       ...formData,
       price: parsedPrice,
@@ -279,6 +352,13 @@ const ProductForm = () => {
       categoryId: finalCategoryId,
       subcategoryId: formData.subcategoryId ?? null,
       brandId: formData.brandId ?? null,
+      faqs: (formData.faqs || [])
+        .map((faq) => ({
+          question: String(faq?.question || "").trim(),
+          answer: String(faq?.answer || "").trim(),
+        }))
+        .filter((faq) => faq.question && faq.answer),
+      variants: buildVariantPayload(formData.variants || {}),
     };
 
     let result;
@@ -598,16 +678,7 @@ const ProductForm = () => {
               <input
                 type="text"
                 value={(formData.variants?.sizes || []).join(", ")}
-                onChange={(e) => {
-                  const sizes = e.target.value
-                    .split(",")
-                    .map((s) => s.trim())
-                    .filter((s) => s);
-                  setFormData({
-                    ...formData,
-                    variants: { ...formData.variants, sizes },
-                  });
-                }}
+                onChange={(e) => updateVariantAxes("sizes", e.target.value)}
                 placeholder="S, M, L, XL"
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm"
               />
@@ -619,20 +690,92 @@ const ProductForm = () => {
               <input
                 type="text"
                 value={(formData.variants?.colors || []).join(", ")}
-                onChange={(e) => {
-                  const colors = e.target.value
-                    .split(",")
-                    .map((c) => c.trim())
-                    .filter((c) => c);
-                  setFormData({
-                    ...formData,
-                    variants: { ...formData.variants, colors },
-                  });
-                }}
+                onChange={(e) => updateVariantAxes("colors", e.target.value)}
                 placeholder="Red, Blue, Green, Black"
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm"
               />
             </div>
+            {variantCombinations.length > 0 && (
+              <div className="border border-gray-200 rounded-lg p-3 bg-gray-50">
+                <p className="text-xs font-semibold text-gray-700 mb-2">
+                  Variant Prices
+                </p>
+                <div className="space-y-2">
+                  {variantCombinations.map((combo) => (
+                    <div key={combo.key} className="grid grid-cols-2 gap-2 items-center">
+                      <p className="text-xs text-gray-700">
+                        {(combo.size || "Any Size") + " / " + (combo.color || "Any Color")}
+                      </p>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={formData.variants?.prices?.[combo.key] ?? ""}
+                        onChange={(e) => {
+                          const nextValue = e.target.value;
+                          setFormData((prev) => ({
+                            ...prev,
+                            variants: {
+                              ...prev.variants,
+                              prices: {
+                                ...(prev.variants?.prices || {}),
+                                [combo.key]: nextValue === "" ? "" : Number(nextValue),
+                              },
+                            },
+                          }));
+                        }}
+                        className="w-full px-2 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 text-xs"
+                        placeholder="Use base price"
+                      />
+                    </div>
+                  ))}
+                </div>
+                <div className="grid grid-cols-2 gap-2 mt-3">
+                  <select
+                    value={formData.variants?.defaultVariant?.size || ""}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        variants: {
+                          ...prev.variants,
+                          defaultVariant: {
+                            ...(prev.variants?.defaultVariant || {}),
+                            size: e.target.value,
+                          },
+                        },
+                      }))
+                    }
+                    className="w-full px-2 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 text-xs"
+                  >
+                    <option value="">Default size (optional)</option>
+                    {(formData.variants?.sizes || []).map((size) => (
+                      <option key={size} value={size}>{size}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={formData.variants?.defaultVariant?.color || ""}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        variants: {
+                          ...prev.variants,
+                          defaultVariant: {
+                            ...(prev.variants?.defaultVariant || {}),
+                            color: e.target.value,
+                          },
+                        },
+                      }))
+                    }
+                    className="w-full px-2 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 text-xs"
+                  >
+                    <option value="">Default color (optional)</option>
+                    {(formData.variants?.colors || []).map((color) => (
+                      <option key={color} value={color}>{color}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -731,6 +874,53 @@ const ProductForm = () => {
             <FiSave />
             {isUploadingMedia ? "Uploading Media..." : isSaving ? "Saving..." : isEdit ? "Update Product" : "Create Product"}
           </button>
+        </div>
+
+        {/* Product FAQs */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-base font-bold text-gray-800">Product FAQs</h2>
+            <button
+              type="button"
+              onClick={addFaq}
+              className="px-3 py-1.5 text-xs font-semibold bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+            >
+              Add FAQ
+            </button>
+          </div>
+          <div className="space-y-3">
+            {(formData.faqs || []).map((faq, index) => (
+              <div key={index} className="border border-gray-200 rounded-lg p-3 bg-gray-50 space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold text-gray-600">FAQ #{index + 1}</p>
+                  <button
+                    type="button"
+                    onClick={() => removeFaq(index)}
+                    className="text-xs text-red-600 hover:text-red-700"
+                  >
+                    Remove
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  value={faq.question || ""}
+                  onChange={(e) => handleFaqChange(index, "question", e.target.value)}
+                  placeholder="Question"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm bg-white"
+                />
+                <textarea
+                  value={faq.answer || ""}
+                  onChange={(e) => handleFaqChange(index, "answer", e.target.value)}
+                  rows={2}
+                  placeholder="Answer"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm bg-white"
+                />
+              </div>
+            ))}
+            {(formData.faqs || []).length === 0 && (
+              <p className="text-xs text-gray-500">No FAQs added yet.</p>
+            )}
+          </div>
         </div>
       </form>
     </motion.div>

@@ -18,7 +18,7 @@ export const getSalesReport = asyncHandler(async (req, res) => {
     const numericLimit = Number.parseInt(limit, 10) || 20;
     const skip = (numericPage - 1) * numericLimit;
 
-    const filter = {};
+    const filter = { isDeleted: { $ne: true } };
     if (status && status !== 'all') filter.status = status;
     if (startDate || endDate) {
         filter.createdAt = {};

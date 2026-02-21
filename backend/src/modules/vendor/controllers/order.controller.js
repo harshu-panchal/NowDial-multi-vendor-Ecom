@@ -45,6 +45,13 @@ export const updateOrderStatus = asyncHandler(async (req, res) => {
     const { status } = req.body;
     const allowed = ['pending', 'processing', 'shipped', 'delivered', 'cancelled'];
     if (!allowed.includes(status)) throw new ApiError(400, `Status must be one of: ${allowed.join(', ')}`);
+    const transitionMap = {
+        pending: ['pending', 'processing', 'cancelled'],
+        processing: ['processing', 'shipped', 'cancelled'],
+        shipped: ['shipped', 'delivered'],
+        delivered: ['delivered'],
+        cancelled: ['cancelled'],
+    };
 
     const { id } = req.params;
     const idFilter = [{ orderId: id }];
@@ -57,6 +64,14 @@ export const updateOrderStatus = asyncHandler(async (req, res) => {
         'vendorItems.vendorId': req.user.id,
     });
     if (!order) throw new ApiError(404, 'Order not found.');
+    const vendorItem = order.vendorItems.find((vi) => String(vi.vendorId) === String(req.user.id));
+    if (!vendorItem) throw new ApiError(404, 'Vendor order item not found.');
+
+    const currentStatus = String(vendorItem.status || 'pending');
+    const allowedNextStatuses = transitionMap[currentStatus] || [];
+    if (!allowedNextStatuses.includes(status)) {
+        throw new ApiError(409, `Cannot move order from ${currentStatus} to ${status}.`);
+    }
 
     // Update only this vendor's items status
     order.vendorItems = order.vendorItems.map((vi) =>

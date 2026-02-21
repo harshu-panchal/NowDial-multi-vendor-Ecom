@@ -15,7 +15,7 @@ import * as promotionController from '../controllers/promotion.controller.js';
 import * as shippingController from '../controllers/shipping.controller.js';
 import * as uploadController from '../controllers/upload.controller.js';
 import { authenticate } from '../../../middlewares/authenticate.js';
-import { authorize } from '../../../middlewares/authorize.js';
+import { authorize, enforceAccountStatus } from '../../../middlewares/authorize.js';
 import { authLimiter } from '../../../middlewares/rateLimiter.js';
 import { validate } from '../../../middlewares/validate.js';
 import {
@@ -23,6 +23,8 @@ import {
     loginSchema,
     verifyOtpSchema,
     resendOtpSchema,
+    refreshTokenSchema,
+    logoutSchema,
     forgotPasswordSchema,
     verifyResetOtpSchema,
     resetPasswordSchema
@@ -30,7 +32,7 @@ import {
 import { uploadSingle, uploadMultiple, uploadDocumentSingle } from '../../../middlewares/upload.js';
 
 const router = Router();
-const vendorAuth = [authenticate, authorize('vendor')];
+const vendorAuth = [authenticate, authorize('vendor'), enforceAccountStatus];
 
 // Auth
 router.post('/auth/register', authLimiter, validate(registerSchema), authController.register);
@@ -40,6 +42,8 @@ router.post('/auth/forgot-password', authLimiter, validate(forgotPasswordSchema)
 router.post('/auth/verify-reset-otp', authLimiter, validate(verifyResetOtpSchema), authController.verifyResetOTP);
 router.post('/auth/reset-password', authLimiter, validate(resetPasswordSchema), authController.resetPassword);
 router.post('/auth/login', authLimiter, validate(loginSchema), authController.login);
+router.post('/auth/refresh', validate(refreshTokenSchema), authController.refresh);
+router.post('/auth/logout', validate(logoutSchema), authController.logout);
 router.get('/auth/profile', ...vendorAuth, authController.getProfile);
 router.put('/auth/profile', ...vendorAuth, authController.updateProfile);
 router.put('/auth/bank-details', ...vendorAuth, authController.updateBankDetails);

@@ -61,6 +61,8 @@ const orderSchema = new mongoose.Schema(
         total: { type: Number, default: 0 },
         couponCode: { type: String },
         couponDiscount: { type: Number, default: 0 },
+        idempotencyKey: { type: String, sparse: true },
+        idempotencyScope: { type: String, sparse: true },
         trackingNumber: { type: String, unique: true, sparse: true },
         deliveryBoyId: { type: mongoose.Schema.Types.ObjectId, ref: 'DeliveryBoy', index: true },
         estimatedDelivery: Date,
@@ -69,8 +71,24 @@ const orderSchema = new mongoose.Schema(
         settledAt: Date,
         cancelledAt: Date,
         cancellationReason: String,
+        isDeleted: { type: Boolean, default: false, index: true },
+        deletedAt: Date,
+        deletedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
     },
     { timestamps: true }
+);
+
+// Prevent duplicate order creation for the same retry key per actor (user/guest).
+orderSchema.index(
+    { idempotencyScope: 1, idempotencyKey: 1 },
+    {
+        unique: true,
+        sparse: true,
+        partialFilterExpression: {
+            idempotencyScope: { $exists: true, $type: 'string' },
+            idempotencyKey: { $exists: true, $type: 'string' },
+        },
+    }
 );
 
 const Order = mongoose.model('Order', orderSchema);

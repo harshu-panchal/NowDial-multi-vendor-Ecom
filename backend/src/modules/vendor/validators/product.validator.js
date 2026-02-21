@@ -14,6 +14,12 @@ export const createProductSchema = Joi.object({
     flashSale: Joi.boolean().default(false),
     isNew: Joi.boolean().default(false),
     tags: Joi.array().items(Joi.string()).optional(),
+    faqs: Joi.array().items(
+        Joi.object({
+            question: Joi.string().trim().allow('').optional(),
+            answer: Joi.string().trim().allow('').optional(),
+        })
+    ).optional(),
     variants: Joi.object({
         sizes: Joi.array().items(Joi.string()),
         colors: Joi.array().items(Joi.string()),

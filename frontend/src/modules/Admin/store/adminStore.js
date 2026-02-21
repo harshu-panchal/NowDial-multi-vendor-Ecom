@@ -1,12 +1,14 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { adminLogin as apiLogin } from '../services/adminService';
+import api from '../../../shared/utils/api';
 
 export const useAdminAuthStore = create(
   persist(
     (set) => ({
       admin: null,
       token: null,
+      refreshToken: null,
       isAuthenticated: false,
       isLoading: false,
 
@@ -15,14 +17,16 @@ export const useAdminAuthStore = create(
         set({ isLoading: true });
         try {
           const response = await apiLogin(email, password);
-          const { accessToken, admin } = response.data;
+          const { accessToken, refreshToken, admin } = response.data;
 
           // Store token under 'adminToken' key (used by adminService interceptor)
           localStorage.setItem('adminToken', accessToken);
+          localStorage.setItem('adminRefreshToken', refreshToken);
 
           set({
             admin,
             token: accessToken,
+            refreshToken,
             isAuthenticated: true,
             isLoading: false,
           });
@@ -36,8 +40,14 @@ export const useAdminAuthStore = create(
 
       // Admin logout
       logout: () => {
-        set({ admin: null, token: null, isAuthenticated: false });
+        const refreshToken = localStorage.getItem('adminRefreshToken');
+        if (refreshToken) {
+          api.post('/admin/auth/logout', { refreshToken }).catch(() => {});
+        }
+
+        set({ admin: null, token: null, refreshToken: null, isAuthenticated: false });
         localStorage.removeItem('adminToken');
+        localStorage.removeItem('adminRefreshToken');
       },
     }),
     {

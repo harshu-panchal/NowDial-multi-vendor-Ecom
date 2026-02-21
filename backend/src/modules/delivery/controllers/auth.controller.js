@@ -6,6 +6,12 @@ import Admin from '../../../models/Admin.model.js';
 import { generateTokens } from '../../../utils/generateToken.js';
 import { createNotification } from '../../../services/notification.service.js';
 import { sendEmail } from '../../../services/email.service.js';
+import {
+    clearRefreshSession,
+    decodeRefreshTokenOrThrow,
+    persistRefreshSession,
+    rotateRefreshSession,
+} from '../../../services/refreshToken.service.js';
 
 const getUploadedPath = (file) => {
     if (!file?.filename) return '';
@@ -139,6 +145,8 @@ export const resetPassword = asyncHandler(async (req, res) => {
     deliveryBoy.resetOtp = undefined;
     deliveryBoy.resetOtpExpiry = undefined;
     deliveryBoy.resetOtpVerified = false;
+    deliveryBoy.refreshTokenHash = undefined;
+    deliveryBoy.refreshTokenExpiresAt = undefined;
     await deliveryBoy.save();
 
     return res.status(200).json(new ApiResponse(200, null, 'Password reset successful. Please login.'));
@@ -166,6 +174,7 @@ export const login = asyncHandler(async (req, res) => {
     if (!isMatch) throw new ApiError(401, 'Invalid credentials.');
 
     const { accessToken, refreshToken } = generateTokens({ id: deliveryBoy._id, role: 'delivery', email: deliveryBoy.email });
+    await persistRefreshSession(deliveryBoy, refreshToken);
     res.status(200).json(new ApiResponse(200, {
         accessToken,
         refreshToken,
@@ -178,6 +187,51 @@ export const login = asyncHandler(async (req, res) => {
             status: deliveryBoy.status || (deliveryBoy.isAvailable ? 'available' : 'offline'),
         }
     }, 'Login successful.'));
+});
+
+// POST /api/delivery/auth/refresh
+export const refresh = asyncHandler(async (req, res) => {
+    const { refreshToken } = req.body;
+    const decoded = decodeRefreshTokenOrThrow(refreshToken);
+    const deliveryBoy = await DeliveryBoy.findById(decoded.id).select('+refreshTokenHash +refreshTokenExpiresAt applicationStatus rejectionReason isActive');
+
+    if (!deliveryBoy) throw new ApiError(401, 'Invalid refresh token.');
+    if (deliveryBoy.applicationStatus === 'pending') {
+        throw new ApiError(403, 'Your account is pending admin approval.');
+    }
+    if (deliveryBoy.applicationStatus === 'rejected') {
+        throw new ApiError(
+            403,
+            `Your delivery application was rejected${deliveryBoy.rejectionReason ? `: ${deliveryBoy.rejectionReason}` : '.'}`
+        );
+    }
+    if (!deliveryBoy.isActive) throw new ApiError(403, 'Account is deactivated. Contact admin.');
+
+    const tokens = await rotateRefreshSession(
+        deliveryBoy,
+        { id: deliveryBoy._id, role: 'delivery', email: deliveryBoy.email },
+        refreshToken
+    );
+
+    return res.status(200).json(new ApiResponse(200, tokens, 'Session refreshed successfully.'));
+});
+
+// POST /api/delivery/auth/logout
+export const logout = asyncHandler(async (req, res) => {
+    const { refreshToken } = req.body;
+    if (refreshToken) {
+        try {
+            const decoded = decodeRefreshTokenOrThrow(refreshToken);
+            const deliveryBoy = await DeliveryBoy.findById(decoded.id).select('+refreshTokenHash +refreshTokenExpiresAt');
+            if (deliveryBoy?.refreshTokenHash) {
+                await clearRefreshSession(deliveryBoy);
+            }
+        } catch {
+            // Keep logout idempotent.
+        }
+    }
+
+    return res.status(200).json(new ApiResponse(200, null, 'Logged out successfully.'));
 });
 
 // GET /api/delivery/auth/profile

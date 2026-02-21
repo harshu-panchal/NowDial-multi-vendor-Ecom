@@ -1,6 +1,7 @@
 import ReturnRequest from '../../../models/ReturnRequest.model.js';
 import Order from '../../../models/Order.model.js';
 import User from '../../../models/User.model.js';
+import Product from '../../../models/Product.model.js';
 import { ApiError } from '../../../utils/ApiError.js';
 import { ApiResponse } from '../../../utils/ApiResponse.js';
 import { asyncHandler } from '../../../utils/asyncHandler.js';
@@ -139,6 +140,18 @@ export const updateReturnRequestStatus = asyncHandler(async (req, res) => {
 
     const allowedStatuses = ['pending', 'approved', 'processing', 'rejected', 'completed'];
     const allowedRefundStatuses = ['pending', 'processed', 'failed'];
+    const statusTransitions = {
+        pending: ['approved', 'rejected'],
+        approved: ['processing', 'completed'],
+        processing: ['completed'],
+        rejected: [],
+        completed: [],
+    };
+    const refundTransitions = {
+        pending: ['processed', 'failed'],
+        failed: ['processed'],
+        processed: [],
+    };
 
     if (status && !allowedStatuses.includes(status)) {
         throw new ApiError(400, `Status must be one of: ${allowedStatuses.join(', ')}`);
@@ -147,15 +160,78 @@ export const updateReturnRequestStatus = asyncHandler(async (req, res) => {
         throw new ApiError(400, `Refund status must be one of: ${allowedRefundStatuses.join(', ')}`);
     }
 
-    if (status) request.status = status;
-    if (adminNote !== undefined) request.adminNote = adminNote;
-    if (refundStatus) request.refundStatus = refundStatus;
+    const nextStatus = status || request.status;
+    const nextRefundStatus = refundStatus || request.refundStatus;
+    const nextAdminNote = adminNote !== undefined ? adminNote : request.adminNote;
+    const statusUnchanged = !status || status === request.status;
+    const refundUnchanged = !refundStatus || refundStatus === request.refundStatus;
+    const adminNoteUnchanged = adminNote === undefined || adminNote === request.adminNote;
+    if (statusUnchanged && refundUnchanged && adminNoteUnchanged) {
+        const normalizedNoop = {
+            ...request._doc,
+            id: request._id,
+            customer: request.userId ? {
+                name: request.userId.name,
+                email: request.userId.email,
+                phone: request.userId.phone
+            } : { name: 'Guest', email: 'N/A' },
+            orderId: request.orderId?.orderId || 'N/A',
+            requestDate: request.createdAt
+        };
+        return res.status(200).json(new ApiResponse(200, normalizedNoop, 'No changes applied.'));
+    }
+
+    if (status && status !== request.status) {
+        const allowedNext = statusTransitions[request.status] || [];
+        if (!allowedNext.includes(status)) {
+            throw new ApiError(409, `Cannot move return request from ${request.status} to ${status}.`);
+        }
+    }
+
+    const currentRefundStatus = request.refundStatus || 'pending';
+    if (refundStatus && refundStatus !== request.refundStatus) {
+        const allowedRefundNext = refundTransitions[currentRefundStatus] || [];
+        if (!allowedRefundNext.includes(refundStatus)) {
+            throw new ApiError(409, `Cannot move refund status from ${currentRefundStatus} to ${refundStatus}.`);
+        }
+    }
+
+    request.status = nextStatus;
+    request.adminNote = nextAdminNote;
+    if (refundStatus) request.refundStatus = nextRefundStatus;
 
     await request.save();
 
-    // If approved, you might want to automate order status update or notify user
-    if (status === 'approved') {
-        // Logic for approved return
+    // Return lifecycle side-effects:
+    // - On approval, mark linked order as returned (if not terminal).
+    // - On completion, restore stock for requested items once.
+    if (status === 'approved' || status === 'completed') {
+        const linkedOrderId = request.orderId?._id || request.orderId;
+        if (linkedOrderId) {
+            const order = await Order.findById(linkedOrderId);
+            if (order && order.isDeleted !== true) {
+                if (status === 'approved' && !['cancelled', 'returned'].includes(order.status)) {
+                    order.status = 'returned';
+                    await order.save();
+                }
+
+                if (status === 'completed') {
+                    const stockRestores = (request.items || []).map(async (item) => {
+                        const qty = Number(item?.quantity || 0);
+                        if (!item?.productId || qty <= 0) return;
+                        const product = await Product.findById(item.productId);
+                        if (!product) return;
+
+                        product.stockQuantity += qty;
+                        if (product.stockQuantity <= 0) product.stock = 'out_of_stock';
+                        else if (product.stockQuantity <= product.lowStockThreshold) product.stock = 'low_stock';
+                        else product.stock = 'in_stock';
+                        await product.save();
+                    });
+                    await Promise.all(stockRestores);
+                }
+            }
+        }
     }
 
     const normalized = {

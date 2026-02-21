@@ -9,6 +9,8 @@ const adminSchema = new mongoose.Schema(
         role: { type: String, enum: ['admin', 'superadmin'], default: 'admin' },
         avatar: { type: String },
         isActive: { type: Boolean, default: true },
+        refreshTokenHash: { type: String, select: false },
+        refreshTokenExpiresAt: { type: Date, select: false },
     },
     { timestamps: true }
 );

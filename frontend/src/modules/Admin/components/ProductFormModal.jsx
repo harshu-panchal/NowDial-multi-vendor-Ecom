@@ -65,6 +65,7 @@ const ProductFormModal = ({ isOpen, onClose, productId, onSuccess }) => {
     seoTitle: "",
     seoDescription: "",
     relatedProducts: [],
+    faqs: [],
   });
 
   const extractId = (value) => {
@@ -156,6 +157,7 @@ const ProductFormModal = ({ isOpen, onClose, productId, onSuccess }) => {
             seoTitle: product.seoTitle || "",
             seoDescription: product.seoDescription || "",
             relatedProducts: product.relatedProducts || [],
+            faqs: Array.isArray(product.faqs) ? product.faqs : [],
           });
         }
       } catch (error) {
@@ -206,6 +208,7 @@ const ProductFormModal = ({ isOpen, onClose, productId, onSuccess }) => {
         seoTitle: "",
         seoDescription: "",
         relatedProducts: [],
+        faqs: [],
       });
     }
   }, [isOpen, isEdit, productId, onClose, categories]);
@@ -303,6 +306,31 @@ const ProductFormModal = ({ isOpen, onClose, productId, onSuccess }) => {
     });
   };
 
+  const handleFaqChange = (index, field, value) => {
+    setFormData((prev) => {
+      const nextFaqs = [...(prev.faqs || [])];
+      nextFaqs[index] = {
+        ...(nextFaqs[index] || { question: "", answer: "" }),
+        [field]: value,
+      };
+      return { ...prev, faqs: nextFaqs };
+    });
+  };
+
+  const addFaq = () => {
+    setFormData((prev) => ({
+      ...prev,
+      faqs: [...(prev.faqs || []), { question: "", answer: "" }],
+    }));
+  };
+
+  const removeFaq = (index) => {
+    setFormData((prev) => ({
+      ...prev,
+      faqs: (prev.faqs || []).filter((_, i) => i !== index),
+    }));
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
 
@@ -312,6 +340,16 @@ const ProductFormModal = ({ isOpen, onClose, productId, onSuccess }) => {
     }
     if (!formData.vendorId) {
       toast.error("Please select a vendor");
+      return;
+    }
+
+    const hasInvalidFaq = (formData.faqs || []).some((faq) => {
+      const question = String(faq?.question || "").trim();
+      const answer = String(faq?.answer || "").trim();
+      return (question && !answer) || (!question && answer);
+    });
+    if (hasInvalidFaq) {
+      toast.error("Each FAQ must have both question and answer");
       return;
     }
 
@@ -335,6 +373,12 @@ const ProductFormModal = ({ isOpen, onClose, productId, onSuccess }) => {
       subcategoryId: formData.subcategoryId || null,
       brandId: formData.brandId || null,
       vendorId: formData.vendorId || null,
+      faqs: (formData.faqs || [])
+        .map((faq) => ({
+          question: String(faq?.question || "").trim(),
+          answer: String(faq?.answer || "").trim(),
+        }))
+        .filter((faq) => faq.question && faq.answer),
     };
 
     try {
@@ -891,6 +935,53 @@ const ProductFormModal = ({ isOpen, onClose, productId, onSuccess }) => {
                         placeholder="tag1, tag2, tag3"
                         className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                       />
+                    </div>
+                  </div>
+
+                  {/* Product FAQs */}
+                  <div>
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-lg font-bold text-gray-800">Product FAQs</h3>
+                      <button
+                        type="button"
+                        onClick={addFaq}
+                        className="px-3 py-1.5 text-xs font-semibold bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+                      >
+                        Add FAQ
+                      </button>
+                    </div>
+                    <div className="space-y-3">
+                      {(formData.faqs || []).map((faq, index) => (
+                        <div key={index} className="border border-gray-200 rounded-lg p-3 bg-gray-50 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <p className="text-xs font-semibold text-gray-600">FAQ #{index + 1}</p>
+                            <button
+                              type="button"
+                              onClick={() => removeFaq(index)}
+                              className="text-xs text-red-600 hover:text-red-700"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                          <input
+                            type="text"
+                            value={faq.question || ""}
+                            onChange={(e) => handleFaqChange(index, "question", e.target.value)}
+                            placeholder="Question"
+                            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white"
+                          />
+                          <textarea
+                            value={faq.answer || ""}
+                            onChange={(e) => handleFaqChange(index, "answer", e.target.value)}
+                            rows={2}
+                            placeholder="Answer"
+                            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white"
+                          />
+                        </div>
+                      ))}
+                      {(formData.faqs || []).length === 0 && (
+                        <p className="text-xs text-gray-500">No FAQs added yet.</p>
+                      )}
                     </div>
                   </div>
 

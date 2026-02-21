@@ -10,6 +10,102 @@ const deriveStockStatus = (stockQuantity = 0, lowStockThreshold = 10) => {
     return 'in_stock';
 };
 
+const sanitizeFaqs = (faqs) => {
+    if (!Array.isArray(faqs)) return [];
+    return faqs
+        .map((faq) => ({
+            question: String(faq?.question || '').trim(),
+            answer: String(faq?.answer || '').trim(),
+        }))
+        .filter((faq) => faq.question && faq.answer);
+};
+
+const normalizeVariantPart = (value) => String(value || '').trim().toLowerCase();
+
+const uniqueAxisValues = (values = []) => {
+    const seen = new Set();
+    const out = [];
+    for (const raw of values) {
+        const value = String(raw || '').trim();
+        if (!value) continue;
+        const key = normalizeVariantPart(value);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(value);
+    }
+    return out;
+};
+
+const createVariantKey = (size = '', color = '') =>
+    `${normalizeVariantPart(size)}|${normalizeVariantPart(color)}`;
+
+const normalizeVariantsPayload = (rawVariants = {}, fallbackPrice) => {
+    if (!rawVariants || typeof rawVariants !== 'object') {
+        return { sizes: [], colors: [], prices: {}, defaultVariant: {} };
+    }
+
+    const sizes = uniqueAxisValues(rawVariants.sizes || []);
+    const colors = uniqueAxisValues(rawVariants.colors || []);
+    const hasSizeAxis = sizes.length > 0;
+    const hasColorAxis = colors.length > 0;
+    const hasAnyAxis = hasSizeAxis || hasColorAxis;
+
+    if (!hasAnyAxis) {
+        return { sizes: [], colors: [], prices: {}, defaultVariant: {} };
+    }
+
+    const combinations = [];
+    if (hasSizeAxis && hasColorAxis) {
+        sizes.forEach((size) => colors.forEach((color) => combinations.push({ size, color })));
+    } else if (hasSizeAxis) {
+        sizes.forEach((size) => combinations.push({ size, color: '' }));
+    } else {
+        colors.forEach((color) => combinations.push({ size: '', color }));
+    }
+
+    const pricesSource =
+        rawVariants.prices instanceof Map
+            ? Object.fromEntries(rawVariants.prices)
+            : (typeof rawVariants.prices === 'object' && rawVariants.prices !== null ? rawVariants.prices : {});
+    const prices = {};
+
+    combinations.forEach(({ size, color }) => {
+        const key = createVariantKey(size, color);
+        const rawPrice = pricesSource[key];
+        const parsedPrice = Number(rawPrice);
+        if (Number.isFinite(parsedPrice) && parsedPrice >= 0) {
+            prices[key] = parsedPrice;
+            return;
+        }
+
+        const fallback = Number(fallbackPrice);
+        if (Number.isFinite(fallback) && fallback >= 0) {
+            prices[key] = fallback;
+        }
+    });
+
+    const defaultSize = String(rawVariants?.defaultVariant?.size || '').trim();
+    const defaultColor = String(rawVariants?.defaultVariant?.color || '').trim();
+    const normalizedDefaultSize = hasSizeAxis ? defaultSize : '';
+    const normalizedDefaultColor = hasColorAxis ? defaultColor : '';
+    const hasValidDefaultSize = !normalizedDefaultSize || sizes.some((s) => normalizeVariantPart(s) === normalizeVariantPart(normalizedDefaultSize));
+    const hasValidDefaultColor = !normalizedDefaultColor || colors.some((c) => normalizeVariantPart(c) === normalizeVariantPart(normalizedDefaultColor));
+
+    if (!hasValidDefaultSize || !hasValidDefaultColor) {
+        throw new ApiError(400, 'Default variant must exist in provided sizes/colors.');
+    }
+
+    return {
+        sizes,
+        colors,
+        prices,
+        defaultVariant: {
+            size: normalizedDefaultSize,
+            color: normalizedDefaultColor,
+        },
+    };
+};
+
 // GET /api/vendor/products
 export const getVendorProducts = asyncHandler(async (req, res) => {
     const { page = 1, limit = 20, search, stock } = req.query;
@@ -49,11 +145,20 @@ export const createProduct = asyncHandler(async (req, res) => {
     }
     const stock = deriveStockStatus(stockQuantity, lowStockThreshold);
 
+    const price = Number(rest.price);
+    if (!Number.isFinite(price) || price < 0) {
+        throw new ApiError(400, 'Invalid product price.');
+    }
+    const normalizedVariants = normalizeVariantsPayload(rest.variants, price);
+
     const product = await Product.create({
         name,
         slug,
         vendorId: req.user.id,
         ...rest,
+        price,
+        variants: normalizedVariants,
+        faqs: sanitizeFaqs(rest.faqs),
         stockQuantity,
         lowStockThreshold,
         stock,
@@ -66,6 +171,9 @@ export const updateProduct = asyncHandler(async (req, res) => {
     const product = await Product.findOne({ _id: req.params.id, vendorId: req.user.id });
     if (!product) throw new ApiError(404, 'Product not found or access denied.');
     Object.assign(product, req.body);
+    if (Object.prototype.hasOwnProperty.call(req.body, 'faqs')) {
+        product.faqs = sanitizeFaqs(req.body.faqs);
+    }
     if (typeof req.body.stockQuantity !== 'undefined' || typeof req.body.lowStockThreshold !== 'undefined') {
         const stockQuantity = Number(product.stockQuantity ?? 0);
         const lowStockThreshold = Number(product.lowStockThreshold ?? 10);
@@ -78,6 +186,16 @@ export const updateProduct = asyncHandler(async (req, res) => {
         product.stockQuantity = stockQuantity;
         product.lowStockThreshold = lowStockThreshold;
         product.stock = deriveStockStatus(stockQuantity, lowStockThreshold);
+    }
+    if (typeof req.body.price !== 'undefined') {
+        const price = Number(req.body.price);
+        if (!Number.isFinite(price) || price < 0) {
+            throw new ApiError(400, 'Invalid product price.');
+        }
+        product.price = price;
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body, 'variants')) {
+        product.variants = normalizeVariantsPayload(req.body.variants, product.price);
     }
     await product.save();
     res.status(200).json(new ApiResponse(200, product, 'Product updated.'));

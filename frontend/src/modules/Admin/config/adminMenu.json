@@ -55,7 +55,8 @@
     "route": "/admin/delivery",
     "children": [
       "Delivery Boys",
-      "Cash Collection"
+      "Cash Collection",
+      "Assign Delivery"
     ]
   },
   {

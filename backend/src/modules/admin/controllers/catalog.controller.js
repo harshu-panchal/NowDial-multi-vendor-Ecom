@@ -6,6 +6,16 @@ import Category from '../../../models/Category.model.js';
 import Brand from '../../../models/Brand.model.js';
 import { slugify } from '../../../utils/slugify.js';
 
+const sanitizeFaqs = (faqs) => {
+    if (!Array.isArray(faqs)) return [];
+    return faqs
+        .map((faq) => ({
+            question: String(faq?.question || '').trim(),
+            answer: String(faq?.answer || '').trim(),
+        }))
+        .filter((faq) => faq.question && faq.answer);
+};
+
 // GET /api/admin/products
 export const getAllProducts = asyncHandler(async (req, res) => {
     const { page = 1, limit = 20, search, vendorId, categoryId, status } = req.query;
@@ -58,6 +68,7 @@ export const createProduct = asyncHandler(async (req, res) => {
         stock: normalizedStock,
         stockQuantity: numericStockQuantity,
         ...rest,
+        faqs: sanitizeFaqs(rest.faqs),
     });
     res.status(201).json(new ApiResponse(201, product, 'Product created.'));
 });
@@ -81,6 +92,9 @@ export const updateProduct = asyncHandler(async (req, res) => {
                     ? 'low_stock'
                     : 'in_stock';
         }
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, 'faqs')) {
+        payload.faqs = sanitizeFaqs(payload.faqs);
     }
 
     const product = await Product.findByIdAndUpdate(req.params.id, payload, { new: true, runValidators: true });
