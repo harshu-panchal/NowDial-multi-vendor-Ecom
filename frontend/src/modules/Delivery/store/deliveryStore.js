@@ -1,0 +1,353 @@
+import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
+import api from '../../../shared/utils/api';
+
+const normalizeDeliveryBoy = (raw) => {
+  if (!raw) return null;
+  const id = raw.id || raw._id;
+  const status = raw.status
+    ? raw.status
+    : raw.isAvailable === false
+      ? 'offline'
+      : 'available';
+
+  return {
+    ...raw,
+    id,
+    _id: id,
+    status,
+  };
+};
+
+const mapBackendStatusToUI = (status) => {
+  if (status === 'shipped') return 'in-transit';
+  if (status === 'delivered') return 'completed';
+  if (status === 'pending' || status === 'processing') return 'pending';
+  return status || 'pending';
+};
+
+const toAddressLine = (shippingAddress = {}) => {
+  const parts = [
+    shippingAddress.address,
+    shippingAddress.city,
+    shippingAddress.state,
+    shippingAddress.zipCode,
+  ].filter(Boolean);
+  return parts.join(', ');
+};
+
+const normalizeOrder = (raw) => {
+  const shippingAddress = raw?.shippingAddress || {};
+  const guestInfo = raw?.guestInfo || {};
+  const backendStatus = raw?.status || 'pending';
+  const uiStatus = mapBackendStatusToUI(backendStatus);
+  const itemCount = Array.isArray(raw?.items)
+    ? raw.items.length
+    : typeof raw?.items === 'number'
+      ? raw.items
+      : 0;
+
+  return {
+    ...raw,
+    id: raw?.orderId || raw?._id || raw?.id,
+    orderId: raw?.orderId || raw?._id || raw?.id,
+    customer: shippingAddress?.name || guestInfo?.name || 'Customer',
+    phone: shippingAddress?.phone || guestInfo?.phone || '',
+    address: toAddressLine(shippingAddress),
+    amount: Number(raw?.total ?? raw?.subtotal ?? 0),
+    total: Number(raw?.total ?? raw?.subtotal ?? 0),
+    deliveryFee: Number(raw?.shipping ?? 0),
+    status: uiStatus,
+    rawStatus: backendStatus,
+    items: Array.isArray(raw?.items) ? raw.items : [],
+    itemCount,
+    distance: raw?.distance || '-',
+    estimatedTime: raw?.estimatedTime || '-',
+  };
+};
+
+export const useDeliveryAuthStore = create(
+  persist(
+    (set, get) => ({
+      deliveryBoy: null,
+      token: null,
+      isAuthenticated: false,
+      isLoading: false,
+      orders: [],
+      selectedOrder: null,
+      isLoadingOrders: false,
+      isLoadingOrder: false,
+      isUpdatingOrderStatus: false,
+      isUpdatingStatus: false,
+
+      // Delivery boy login action
+      register: async (registrationData) => {
+        set({ isLoading: true });
+        try {
+          const formData = new FormData();
+          formData.append('name', registrationData.name || '');
+          formData.append('email', registrationData.email || '');
+          formData.append('password', registrationData.password || '');
+          formData.append('phone', registrationData.phone || '');
+          formData.append('address', registrationData.address || '');
+          formData.append('vehicleType', registrationData.vehicleType || '');
+          formData.append('vehicleNumber', registrationData.vehicleNumber || '');
+          if (registrationData.drivingLicense) {
+            formData.append('drivingLicense', registrationData.drivingLicense);
+          }
+          if (registrationData.aadharCard) {
+            formData.append('aadharCard', registrationData.aadharCard);
+          }
+
+          const response = await api.post('/delivery/auth/register', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+          });
+          const payload = response?.data ?? response;
+          set({ isLoading: false });
+          return { success: true, message: payload?.message || 'Registration submitted.' };
+        } catch (error) {
+          set({ isLoading: false });
+          throw error;
+        }
+      },
+
+      forgotPassword: async (email) => {
+        set({ isLoading: true });
+        try {
+          const response = await api.post('/delivery/auth/forgot-password', { email });
+          const payload = response?.data ?? response;
+          set({ isLoading: false });
+          return { success: true, message: payload?.message };
+        } catch (error) {
+          set({ isLoading: false });
+          throw error;
+        }
+      },
+
+      verifyResetOtp: async (email, otp) => {
+        set({ isLoading: true });
+        try {
+          const response = await api.post('/delivery/auth/verify-reset-otp', { email, otp });
+          const payload = response?.data ?? response;
+          set({ isLoading: false });
+          return { success: true, message: payload?.message };
+        } catch (error) {
+          set({ isLoading: false });
+          throw error;
+        }
+      },
+
+      resetPassword: async (email, password, confirmPassword) => {
+        set({ isLoading: true });
+        try {
+          const response = await api.post('/delivery/auth/reset-password', { email, password, confirmPassword });
+          const payload = response?.data ?? response;
+          set({ isLoading: false });
+          return { success: true, message: payload?.message };
+        } catch (error) {
+          set({ isLoading: false });
+          throw error;
+        }
+      },
+
+      // Delivery boy login action
+      login: async (email, password, rememberMe = false) => {
+        set({ isLoading: true });
+        try {
+          const response = await api.post('/delivery/auth/login', { email, password });
+          const payload = response?.data ?? response;
+          const accessToken = payload?.accessToken;
+          const loginDeliveryBoy = normalizeDeliveryBoy(payload?.deliveryBoy);
+
+          if (!accessToken || !loginDeliveryBoy) {
+            throw new Error('Invalid login response from server.');
+          }
+
+          localStorage.setItem('delivery-token', accessToken);
+
+          let enriched = loginDeliveryBoy;
+          try {
+            const profileResponse = await api.get('/delivery/auth/profile');
+            const profilePayload = profileResponse?.data ?? profileResponse;
+            enriched = normalizeDeliveryBoy({ ...loginDeliveryBoy, ...profilePayload });
+          } catch {
+            // Keep login payload as fallback.
+          }
+
+          set({
+            deliveryBoy: enriched,
+            token: accessToken,
+            isAuthenticated: true,
+            isLoading: false,
+          });
+
+          return { success: true, deliveryBoy: enriched };
+        } catch (error) {
+          set({ isLoading: false });
+          throw error;
+        }
+      },
+
+      // Delivery boy logout action
+      logout: () => {
+        set({
+          deliveryBoy: null,
+          token: null,
+          isAuthenticated: false,
+          orders: [],
+          selectedOrder: null,
+        });
+        localStorage.removeItem('delivery-token');
+      },
+
+      // Update delivery boy status
+      updateStatus: async (status) => {
+        const current = get().deliveryBoy;
+        if (!current) return false;
+
+        const isAvailable = status === 'available' || status === 'busy';
+        set({ isUpdatingStatus: true });
+        try {
+          const response = await api.put('/delivery/auth/profile', { isAvailable, status });
+          const payload = response?.data ?? response;
+          set({
+            deliveryBoy: normalizeDeliveryBoy({
+              ...current,
+              ...payload,
+              status,
+            }),
+            isUpdatingStatus: false,
+          });
+          return true;
+        } catch (error) {
+          set({ isUpdatingStatus: false });
+          throw error;
+        }
+      },
+
+      fetchProfile: async () => {
+        set({ isLoading: true });
+        try {
+          const response = await api.get('/delivery/auth/profile');
+          const payload = response?.data ?? response;
+          const deliveryBoy = normalizeDeliveryBoy(payload);
+          set({ deliveryBoy, isLoading: false });
+          return deliveryBoy;
+        } catch (error) {
+          set({ isLoading: false });
+          throw error;
+        }
+      },
+
+      updateProfile: async (profileData) => {
+        set({ isLoading: true });
+        try {
+          const response = await api.put('/delivery/auth/profile', profileData);
+          const payload = response?.data ?? response;
+          const current = get().deliveryBoy || {};
+          const deliveryBoy = normalizeDeliveryBoy({ ...current, ...payload });
+          set({ deliveryBoy, isLoading: false });
+          return deliveryBoy;
+        } catch (error) {
+          set({ isLoading: false });
+          throw error;
+        }
+      },
+
+      fetchOrders: async () => {
+        set({ isLoadingOrders: true });
+        try {
+          const response = await api.get('/delivery/orders');
+          const payload = response?.data ?? response;
+          const list = Array.isArray(payload) ? payload.map(normalizeOrder) : [];
+          set({ orders: list, isLoadingOrders: false });
+          return list;
+        } catch (error) {
+          set({ isLoadingOrders: false });
+          throw error;
+        }
+      },
+
+      fetchOrderById: async (id) => {
+        set({ isLoadingOrder: true });
+        try {
+          const response = await api.get(`/delivery/orders/${id}`);
+          const payload = response?.data ?? response;
+          const order = normalizeOrder(payload);
+          set({ selectedOrder: order, isLoadingOrder: false });
+          return order;
+        } catch (error) {
+          set({ isLoadingOrder: false });
+          throw error;
+        }
+      },
+
+      updateOrderStatus: async (id, backendStatus) => {
+        set({ isUpdatingOrderStatus: true });
+        try {
+          const response = await api.patch(`/delivery/orders/${id}/status`, { status: backendStatus });
+          const payload = response?.data ?? response;
+          const normalized = normalizeOrder(payload);
+          set((state) => ({
+            orders: state.orders.map((order) => (String(order.id) === String(id) ? normalized : order)),
+            selectedOrder:
+              state.selectedOrder && String(state.selectedOrder.id) === String(id)
+                ? normalized
+                : state.selectedOrder,
+            isUpdatingOrderStatus: false,
+          }));
+          return normalized;
+        } catch (error) {
+          set({ isUpdatingOrderStatus: false });
+          throw error;
+        }
+      },
+
+      acceptOrder: async (id) => {
+        const state = get();
+        const current =
+          state.orders.find((order) => String(order.id) === String(id)) ||
+          (state.selectedOrder && String(state.selectedOrder.id) === String(id)
+            ? state.selectedOrder
+            : null);
+        if (current && current.status !== 'pending') {
+          return current;
+        }
+        return get().updateOrderStatus(id, 'shipped');
+      },
+
+      completeOrder: async (id) => {
+        const state = get();
+        const current =
+          state.orders.find((order) => String(order.id) === String(id)) ||
+          (state.selectedOrder && String(state.selectedOrder.id) === String(id)
+            ? state.selectedOrder
+            : null);
+        if (current && current.status !== 'in-transit') {
+          return current;
+        }
+        return get().updateOrderStatus(id, 'delivered');
+      },
+
+      // Initialize delivery auth state from localStorage
+      initialize: () => {
+        const token = localStorage.getItem('delivery-token');
+        if (token) {
+          const storedState = JSON.parse(localStorage.getItem('delivery-auth-storage') || '{}');
+          if (storedState.state?.deliveryBoy) {
+            set({
+              deliveryBoy: normalizeDeliveryBoy(storedState.state.deliveryBoy),
+              token,
+              isAuthenticated: true,
+            });
+          }
+        }
+      },
+    }),
+    {
+      name: 'delivery-auth-storage',
+      storage: createJSONStorage(() => localStorage),
+    }
+  )
+);
+

@@ -1,0 +1,174 @@
+import ReturnRequest from '../../../models/ReturnRequest.model.js';
+import Order from '../../../models/Order.model.js';
+import User from '../../../models/User.model.js';
+import { ApiError } from '../../../utils/ApiError.js';
+import { ApiResponse } from '../../../utils/ApiResponse.js';
+import { asyncHandler } from '../../../utils/asyncHandler.js';
+
+/**
+ * @desc    Get all return requests with filtering and pagination
+ * @route   GET /api/admin/return-requests
+ * @access  Private (Admin)
+ */
+export const getAllReturnRequests = asyncHandler(async (req, res) => {
+    const { page = 1, limit = 10, search = '', status } = req.query;
+    const numericPage = Number(page) || 1;
+    const numericLimit = Number(limit) || 10;
+
+    const filter = {};
+
+    if (status && status !== 'all') {
+        filter.status = status;
+    }
+
+    // Search by return id, order number, customer fields, and reason text
+    if (search) {
+        const regex = new RegExp(search, 'i');
+        const isObjectId = search.match(/^[0-9a-fA-F]{24}$/);
+
+        const [matchedOrders, matchedUsers] = await Promise.all([
+            Order.find({ orderId: regex }).select('_id').lean(),
+            User.find({
+                $or: [{ name: regex }, { email: regex }, { phone: regex }]
+            }).select('_id').limit(200).lean(),
+        ]);
+
+        const matchedOrderIds = matchedOrders.map((o) => o._id);
+        const matchedUserIds = matchedUsers.map((u) => u._id);
+
+        const orFilters = [
+            { reason: regex },
+            { 'items.name': regex },
+            ...(matchedOrderIds.length > 0 ? [{ orderId: { $in: matchedOrderIds } }] : []),
+            ...(matchedUserIds.length > 0 ? [{ userId: { $in: matchedUserIds } }] : []),
+        ];
+
+        if (isObjectId) {
+            orFilters.push({ _id: search }, { orderId: search });
+        }
+
+        if (orFilters.length > 0) {
+            filter.$or = orFilters;
+        }
+    }
+
+    const returnRequests = await ReturnRequest.find(filter)
+        .populate('userId', 'name email phone')
+        .populate('orderId', 'orderId total')
+        .sort({ createdAt: -1 })
+        .skip((numericPage - 1) * numericLimit)
+        .limit(numericLimit);
+
+    const total = await ReturnRequest.countDocuments(filter);
+
+    // Normalize data for frontend
+    const normalizedRequests = returnRequests.map(req => ({
+        ...req._doc,
+        id: req._id,
+        customer: req.userId ? {
+            name: req.userId.name,
+            email: req.userId.email,
+            phone: req.userId.phone
+        } : { name: 'Guest', email: 'N/A' },
+        orderId: req.orderId ? req.orderId.orderId : 'N/A',
+        requestDate: req.createdAt
+    }));
+
+    res.status(200).json(
+        new ApiResponse(200, {
+            returnRequests: normalizedRequests,
+            pagination: {
+                total,
+                page: numericPage,
+                limit: numericLimit,
+                pages: Math.ceil(total / numericLimit)
+            }
+        }, 'Return requests fetched successfully')
+    );
+});
+
+/**
+ * @desc    Get return request detail
+ * @route   GET /api/admin/return-requests/:id
+ * @access  Private (Admin)
+ */
+export const getReturnRequestById = asyncHandler(async (req, res) => {
+    const request = await ReturnRequest.findById(req.params.id)
+        .populate('userId', 'name email phone')
+        .populate('orderId', 'orderId total createdAt')
+        .populate('vendorId', 'shopName email');
+
+    if (!request) {
+        throw new ApiError(404, 'Return request not found');
+    }
+
+    // Normalize
+    const normalized = {
+        ...request._doc,
+        id: request._id,
+        customer: request.userId ? {
+            name: request.userId.name,
+            email: request.userId.email,
+            phone: request.userId.phone
+        } : { name: 'Guest', email: 'N/A' },
+        orderId: request.orderId?.orderId || 'N/A',
+        orderRefId: request.orderId?._id || null,
+        requestDate: request.createdAt
+    };
+
+    res.status(200).json(
+        new ApiResponse(200, normalized, 'Return request details fetched successfully')
+    );
+});
+
+/**
+ * @desc    Update return request status
+ * @route   PATCH /api/admin/return-requests/:id/status
+ * @access  Private (Admin)
+ */
+export const updateReturnRequestStatus = asyncHandler(async (req, res) => {
+    const { status, adminNote, refundStatus } = req.body;
+
+    const request = await ReturnRequest.findById(req.params.id)
+        .populate('userId', 'name email phone')
+        .populate('orderId', 'orderId total');
+
+    if (!request) {
+        throw new ApiError(404, 'Return request not found');
+    }
+
+    const allowedStatuses = ['pending', 'approved', 'processing', 'rejected', 'completed'];
+    const allowedRefundStatuses = ['pending', 'processed', 'failed'];
+
+    if (status && !allowedStatuses.includes(status)) {
+        throw new ApiError(400, `Status must be one of: ${allowedStatuses.join(', ')}`);
+    }
+    if (refundStatus && !allowedRefundStatuses.includes(refundStatus)) {
+        throw new ApiError(400, `Refund status must be one of: ${allowedRefundStatuses.join(', ')}`);
+    }
+
+    if (status) request.status = status;
+    if (adminNote !== undefined) request.adminNote = adminNote;
+    if (refundStatus) request.refundStatus = refundStatus;
+
+    await request.save();
+
+    // If approved, you might want to automate order status update or notify user
+    if (status === 'approved') {
+        // Logic for approved return
+    }
+
+    const normalized = {
+        ...request._doc,
+        id: request._id,
+        customer: request.userId ? {
+            name: request.userId.name,
+            email: request.userId.email,
+            phone: request.userId.phone
+        } : { name: 'Guest', email: 'N/A' },
+        orderId: request.orderId?.orderId || 'N/A',
+        requestDate: request.createdAt
+    };
+
+    res.status(200).json(new ApiResponse(200, normalized, 'Return request status updated successfully'));
+});
