@@ -12,9 +12,11 @@ const toApiVendor = (vendorDoc) => {
         ? vendorDoc.toObject()
         : (vendorDoc || {});
 
+    const normalizedId = vendor?._id ? String(vendor._id) : String(vendor?.id || '');
     const normalizedCommissionRate = Number(vendor.commissionRate);
     return {
         ...vendor,
+        id: normalizedId,
         commissionRate: Number.isFinite(normalizedCommissionRate)
             ? normalizedCommissionRate / 100
             : 0

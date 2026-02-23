@@ -141,6 +141,7 @@ const Banners = () => {
               { value: 'all', label: 'All Types' },
               { value: 'hero', label: 'Hero Banners' },
               { value: 'promotional', label: 'Promotional Banners' },
+              { value: 'side_banner', label: 'Side Banners' },
             ]}
             className="min-w-[140px]"
           />
@@ -208,7 +209,13 @@ const Banners = () => {
                       </div>
                       <div className="absolute top-2 left-2">
                         <Badge variant="info">
-                          {banner.type === 'hero' ? 'Hero' : 'Promo'}
+                          {banner.type === 'hero'
+                            ? 'Hero'
+                            : banner.type === 'promotional'
+                              ? 'Promo'
+                              : banner.type === 'side_banner'
+                                ? 'Side'
+                                : 'Banner'}
                         </Badge>
                       </div>
                     </div>

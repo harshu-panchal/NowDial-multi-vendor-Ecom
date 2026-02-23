@@ -125,6 +125,7 @@ import MobileOffers from "./modules/UserApp/pages/Offers";
 import MobileDailyDeals from "./modules/UserApp/pages/DailyDeals";
 import MobileFlashSale from "./modules/UserApp/pages/FlashSale";
 import MobileNewArrivals from "./modules/UserApp/pages/NewArrivals";
+import MobileCampaignSale from "./modules/UserApp/pages/CampaignSale";
 import MobileTrackOrder from "./modules/UserApp/pages/TrackOrder";
 import MobileOrderConfirmation from "./modules/UserApp/pages/OrderConfirmation";
 import ComingSoon from "./modules/UserApp/pages/ComingSoon";
@@ -334,6 +335,14 @@ const AppRoutes = () => {
         element={
           <RouteWrapper>
             <MobileNewArrivals />
+          </RouteWrapper>
+        }
+      />
+      <Route
+        path="/sale/:slug"
+        element={
+          <RouteWrapper>
+            <MobileCampaignSale />
           </RouteWrapper>
         }
       />

@@ -4,6 +4,7 @@ import { ApiResponse } from '../../../utils/ApiResponse.js';
 import Coupon from '../../../models/Coupon.model.js';
 import Banner from '../../../models/Banner.model.js';
 import Campaign from '../../../models/Campaign.model.js';
+import { slugify } from '../../../utils/slugify.js';
 
 const COUPON_TYPES = new Set(['percentage', 'fixed', 'freeship']);
 
@@ -23,6 +24,73 @@ const toValidDateOrNull = (value) => {
     if (value === undefined || value === null || value === '') return null;
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const normalizeObjectIdList = (values) => {
+    if (!Array.isArray(values)) return [];
+    return values
+        .map((value) => String(value || '').trim())
+        .filter((value) => value.length > 0);
+};
+
+const ensureUniqueCampaignSlug = async (baseNameOrSlug, excludeId = null) => {
+    const base = slugify(String(baseNameOrSlug || '').trim()) || `campaign-${Date.now()}`;
+    let candidate = base;
+    let counter = 1;
+    while (true) {
+        const query = excludeId
+            ? { slug: candidate, _id: { $ne: excludeId } }
+            : { slug: candidate };
+        const exists = await Campaign.exists(query);
+        if (!exists) return candidate;
+        candidate = `${base}-${counter}`;
+        counter += 1;
+    }
+};
+
+const syncCampaignBanner = async (campaign, previousRoute = null) => {
+    if (!campaign?.autoCreateBanner || !campaign?.route) return;
+
+    const title = campaign.bannerConfig?.title || campaign.name || 'Special Offer';
+    const subtitle =
+        campaign.bannerConfig?.subtitle ||
+        (campaign.discountType === 'percentage'
+            ? `${campaign.discountValue || 0}% OFF`
+            : `Save ${campaign.discountValue || 0}`);
+
+    const image = campaign.bannerConfig?.image || '';
+    const bannerPayload = {
+        title,
+        subtitle,
+        description: campaign.description || '',
+        link: campaign.route,
+        type: 'promotional',
+        isActive: !!campaign.isActive,
+    };
+    if (image) {
+        bannerPayload.image = image;
+    }
+
+    const baseFilter = { type: 'promotional' };
+    if (previousRoute && previousRoute !== campaign.route) {
+        const updated = await Banner.findOneAndUpdate(
+            { ...baseFilter, link: previousRoute },
+            bannerPayload,
+            { new: true }
+        );
+        if (updated) return;
+    }
+
+    const existing = await Banner.findOne({ ...baseFilter, link: campaign.route });
+    if (existing) {
+        Object.assign(existing, bannerPayload);
+        await existing.save();
+        return;
+    }
+
+    if (bannerPayload.image) {
+        await Banner.create(bannerPayload);
+    }
 };
 
 const formatCoupon = (couponDoc) => {
@@ -243,13 +311,35 @@ export const getAllCampaigns = asyncHandler(async (req, res) => {
 });
 
 export const createCampaign = asyncHandler(async (req, res) => {
-    const campaign = await Campaign.create(req.body);
+    const payload = { ...req.body };
+    const slugSource = payload.slug || payload.name;
+    payload.slug = await ensureUniqueCampaignSlug(slugSource);
+    payload.route = `/sale/${payload.slug}`;
+    payload.productIds = normalizeObjectIdList(payload.productIds);
+
+    const campaign = await Campaign.create(payload);
+    await syncCampaignBanner(campaign);
     return res.status(201).json(new ApiResponse(201, campaign, 'Campaign created successfully'));
 });
 
 export const updateCampaign = asyncHandler(async (req, res) => {
-    const campaign = await Campaign.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    const existing = await Campaign.findById(req.params.id);
+    if (!existing) throw new ApiError(404, 'Campaign not found');
+
+    const payload = { ...req.body };
+    if (payload.name !== undefined || payload.slug !== undefined) {
+        const slugSource = payload.slug || payload.name || existing.slug || existing.name;
+        payload.slug = await ensureUniqueCampaignSlug(slugSource, existing._id);
+    }
+    payload.route = `/sale/${payload.slug || existing.slug}`;
+    if (payload.productIds !== undefined) {
+        payload.productIds = normalizeObjectIdList(payload.productIds);
+    }
+
+    const campaign = await Campaign.findByIdAndUpdate(req.params.id, payload, { new: true });
     if (!campaign) throw new ApiError(404, 'Campaign not found');
+
+    await syncCampaignBanner(campaign, existing.route || null);
     return res.status(200).json(new ApiResponse(200, campaign, 'Campaign updated successfully'));
 });
 

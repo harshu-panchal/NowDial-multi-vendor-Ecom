@@ -31,14 +31,15 @@ const MobileCategories = () => {
     initialize();
   }, [initialize]);
 
-  // Get root categories (categories without parent) and merge with fallback to preserve images
+  // Get root categories (categories without parent) and merge with fallback.
+  // Backend category image should take priority when present.
   const rootCategories = useMemo(() => {
     const roots = getRootCategories().filter((cat) => cat.isActive !== false);
     if (roots.length === 0) {
       return fallbackCategories;
     }
-    // Merge store categories with fallback categories to preserve image references
-    // This ensures images from imported modules are used instead of serialized strings
+    // Keep backend values as source of truth.
+    // Use fallback image only when backend category has no image.
     return roots.map((cat) => {
       const fallbackCat = fallbackCategories.find(
         (fc) =>
@@ -46,12 +47,10 @@ const MobileCategories = () => {
           fc.name?.toLowerCase() === cat.name?.toLowerCase()
       );
       if (fallbackCat) {
-        // Use fallback category data but preserve any custom fields from store
         return {
           ...fallbackCat,
           ...cat,
-          // Always use image from fallback (imported module reference)
-          image: fallbackCat.image,
+          image: cat.image || fallbackCat.image,
         };
       }
       return cat;

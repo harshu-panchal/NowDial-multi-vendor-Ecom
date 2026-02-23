@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { FiHeart } from "react-icons/fi";
 import MobileLayout from "../components/Layout/MobileLayout";
 import ProductCard from "../../../shared/components/ProductCard";
@@ -15,33 +15,290 @@ import {
   getMostPopular,
   getTrending,
   getFlashSale,
+  getDailyDeals,
+  getAllNewArrivals,
+  getRecommendedProducts,
+  getApprovedVendors,
+  getCatalogBrands,
 } from "../data/catalogData";
 import PageTransition from "../../../shared/components/PageTransition";
 import usePullToRefresh from "../hooks/usePullToRefresh";
 import toast from "react-hot-toast";
+import api from "../../../shared/utils/api";
 import heroSlide1 from "../../../../data/hero/slide1.png";
 import heroSlide2 from "../../../../data/hero/slide2.png";
 import heroSlide3 from "../../../../data/hero/slide3.png";
 import heroSlide4 from "../../../../data/hero/slide4.png";
 import stylishWatchImg from "../../../../data/products/stylish watch.png";
 
+const normalizeId = (value) => String(value ?? "").trim();
+const toNumber = (value, fallback = 0) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const normalizeProduct = (raw) => {
+  const vendorObj =
+    raw?.vendor && typeof raw.vendor === "object"
+      ? raw.vendor
+      : raw?.vendorId && typeof raw.vendorId === "object"
+        ? raw.vendorId
+        : null;
+  const brandObj =
+    raw?.brand && typeof raw.brand === "object"
+      ? raw.brand
+      : raw?.brandId && typeof raw.brandId === "object"
+        ? raw.brandId
+        : null;
+  const categoryObj =
+    raw?.category && typeof raw.category === "object"
+      ? raw.category
+      : raw?.categoryId && typeof raw.categoryId === "object"
+        ? raw.categoryId
+        : null;
+
+  const id = normalizeId(raw?.id || raw?._id);
+  const vendorId = normalizeId(vendorObj?._id || vendorObj?.id || raw?.vendorId);
+  const brandId = normalizeId(brandObj?._id || brandObj?.id || raw?.brandId);
+  const categoryId = normalizeId(
+    categoryObj?._id || categoryObj?.id || raw?.categoryId
+  );
+  const image = raw?.image || raw?.images?.[0] || "";
+
+  return {
+    ...raw,
+    id,
+    _id: id,
+    vendorId,
+    vendorName: raw?.vendorName || vendorObj?.storeName || vendorObj?.name || "",
+    brandId,
+    brandName: raw?.brandName || brandObj?.name || "",
+    categoryId,
+    categoryName: raw?.categoryName || categoryObj?.name || "",
+    image,
+    images: Array.isArray(raw?.images) ? raw.images : image ? [image] : [],
+    price: toNumber(raw?.price, 0),
+    originalPrice:
+      raw?.originalPrice !== undefined ? toNumber(raw.originalPrice, undefined) : undefined,
+    rating: toNumber(raw?.rating, 0),
+    reviewCount: toNumber(raw?.reviewCount, 0),
+    isActive: raw?.isActive !== false,
+    flashSale: !!raw?.flashSale,
+    isNew: !!raw?.isNew,
+  };
+};
+
+const normalizeVendor = (raw) => ({
+  ...raw,
+  id: normalizeId(raw?.id || raw?._id),
+  _id: normalizeId(raw?.id || raw?._id),
+  isVerified: !!raw?.isVerified,
+  rating: toNumber(raw?.rating, 0),
+  reviewCount: toNumber(raw?.reviewCount, 0),
+  status: raw?.status || "approved",
+});
+
+const normalizeBrand = (raw) => ({
+  ...raw,
+  id: normalizeId(raw?.id || raw?._id),
+  _id: normalizeId(raw?.id || raw?._id),
+  name: raw?.name || "",
+  logo: raw?.logo || "",
+});
+
+const deriveDailyDeals = (products = []) => {
+  const flash = products.filter((p) => p.flashSale);
+  const discounted = products.filter(
+    (p) =>
+      p.originalPrice !== undefined &&
+      toNumber(p.originalPrice, 0) > toNumber(p.price, 0) &&
+      !p.flashSale
+  );
+  const merged = [...flash, ...discounted];
+  return merged.filter(
+    (p, index, arr) =>
+      index === arr.findIndex((x) => normalizeId(x.id) === normalizeId(p.id))
+  );
+};
+
+const DEFAULT_HERO_SLIDES = [
+  { image: heroSlide1 },
+  { image: heroSlide2 },
+  { image: heroSlide3 },
+  { image: heroSlide4 },
+];
+
+const extractResponseData = (response) => {
+  if (response && typeof response === "object") {
+    if (Object.prototype.hasOwnProperty.call(response, "data")) {
+      return response.data;
+    }
+    return response;
+  }
+  return null;
+};
+
+const asList = (value) => (Array.isArray(value) ? value : []);
+
 const MobileHome = () => {
+  const navigate = useNavigate();
   const [currentSlide, setCurrentSlide] = useState(0);
   const [touchStart, setTouchStart] = useState(null);
   const [touchEnd, setTouchEnd] = useState(null);
   const [dragOffset, setDragOffset] = useState(0);
   const [autoSlidePaused, setAutoSlidePaused] = useState(false);
-
-  const slides = [
-    { image: heroSlide1 },
-    { image: heroSlide2 },
-    { image: heroSlide3 },
-    { image: heroSlide4 },
-  ];
+  const [isDraggingSlide, setIsDraggingSlide] = useState(false);
+  const [slides, setSlides] = useState(DEFAULT_HERO_SLIDES);
+  const [promoBanners, setPromoBanners] = useState([]);
+  const [sideBanner, setSideBanner] = useState(null);
+  const [catalogProducts, setCatalogProducts] = useState([]);
+  const [homeVendors, setHomeVendors] = useState([]);
+  const [homeBrands, setHomeBrands] = useState([]);
 
   const mostPopular = getMostPopular();
   const trending = getTrending();
   const flashSale = getFlashSale();
+  const fallbackNewArrivals = getAllNewArrivals().slice(0, 6);
+  const fallbackDailyDeals = getDailyDeals().slice(0, 5);
+  const fallbackRecommended = getRecommendedProducts(6);
+  const fallbackVendors = getApprovedVendors();
+  const fallbackBrands = getCatalogBrands().slice(0, 10);
+
+  const computedNewArrivals = useMemo(() => {
+    if (catalogProducts.length === 0) return fallbackNewArrivals;
+    return catalogProducts.filter((p) => p.isNew).slice(0, 6);
+  }, [catalogProducts, fallbackNewArrivals]);
+
+  const computedDailyDeals = useMemo(() => {
+    if (catalogProducts.length === 0) return fallbackDailyDeals;
+    return deriveDailyDeals(catalogProducts).slice(0, 5);
+  }, [catalogProducts, fallbackDailyDeals]);
+
+  const computedRecommended = useMemo(() => {
+    if (catalogProducts.length === 0) return fallbackRecommended;
+    return [...catalogProducts]
+      .sort((a, b) => toNumber(b.rating, 0) - toNumber(a.rating, 0))
+      .slice(0, 6);
+  }, [catalogProducts, fallbackRecommended]);
+
+  const computedVendors = useMemo(() => {
+    if (homeVendors.length === 0) return fallbackVendors;
+    return [...homeVendors]
+      .filter((vendor) => vendor.status === "approved")
+      .sort((a, b) => toNumber(b.rating, 0) - toNumber(a.rating, 0))
+      .slice(0, 10);
+  }, [homeVendors, fallbackVendors]);
+
+  const computedBrands = useMemo(() => {
+    if (homeBrands.length === 0) return fallbackBrands;
+    return homeBrands.slice(0, 10);
+  }, [homeBrands, fallbackBrands]);
+
+  const fetchHomeData = useCallback(async () => {
+    try {
+      const [productsRes, vendorsRes, brandsRes, homeSlidesRes, promoRes, sideBannerRes] =
+        await Promise.allSettled([
+          api.get("/products", { params: { page: 1, limit: 120 } }),
+          api.get("/vendors/all", {
+            params: { status: "approved", page: 1, limit: 50 },
+          }),
+          api.get("/brands/all"),
+          api.get("/banners", { params: { type: "home_slider" } }),
+          api.get("/banners", { params: { type: "promotional" } }),
+          api.get("/banners", { params: { type: "side_banner" } }),
+        ]);
+
+      if (productsRes.status === "fulfilled") {
+        const payload = extractResponseData(productsRes.value);
+        const productsSource = asList(payload?.products);
+        const normalizedProducts = productsSource
+          .map(normalizeProduct)
+          .filter((product) => product.id && product.isActive !== false);
+        setCatalogProducts(normalizedProducts);
+      }
+
+      if (vendorsRes.status === "fulfilled") {
+        const payload = extractResponseData(vendorsRes.value);
+        const vendorsSource = asList(payload?.vendors);
+        setHomeVendors(
+          vendorsSource
+            .map(normalizeVendor)
+            .filter((vendor) => vendor.id)
+        );
+      }
+
+      if (brandsRes.status === "fulfilled") {
+        const payload = extractResponseData(brandsRes.value);
+        const brandsSource = asList(payload);
+        setHomeBrands(
+          brandsSource
+            .map(normalizeBrand)
+            .filter((brand) => brand.id)
+        );
+      }
+
+      if (homeSlidesRes.status === "fulfilled") {
+        const payload = extractResponseData(homeSlidesRes.value);
+        const bannerSlides = asList(payload)
+          .filter((banner) => banner?.image && banner?.isActive !== false)
+          .sort((a, b) => toNumber(a.order, 0) - toNumber(b.order, 0))
+          .map((banner, index) => ({
+            id: normalizeId(banner._id || banner.id || `home-slide-${index}`),
+            image: banner.image,
+            link: banner.link || "/offers",
+            title: banner.title || "",
+          }));
+
+        setSlides(bannerSlides.length > 0 ? bannerSlides : DEFAULT_HERO_SLIDES);
+      } else {
+        setSlides(DEFAULT_HERO_SLIDES);
+      }
+
+      if (promoRes.status === "fulfilled") {
+        const payload = extractResponseData(promoRes.value);
+        const banners = asList(payload)
+          .filter((banner) => banner?.image && banner?.isActive !== false)
+          .sort((a, b) => toNumber(a.order, 0) - toNumber(b.order, 0))
+          .map((banner, index) => ({
+            id: normalizeId(banner._id || banner.id || `promo-banner-${index}`),
+            title: banner.title || "Special Offer",
+            subtitle: banner.subtitle || "Limited Time",
+            description: banner.description || "",
+            discount: banner.description || "Shop Now",
+            link: banner.link || "/offers",
+            image: banner.image,
+            type: banner.type || "promotional",
+          }));
+        setPromoBanners(banners);
+      } else {
+        setPromoBanners([]);
+      }
+
+      if (sideBannerRes.status === "fulfilled") {
+        const payload = extractResponseData(sideBannerRes.value);
+        const mapped = asList(payload)
+          .filter((banner) => banner?.image && banner?.isActive !== false)
+          .sort((a, b) => toNumber(a.order, 0) - toNumber(b.order, 0))
+          .map((banner, index) => ({
+            id: normalizeId(banner._id || banner.id || `side-banner-${index}`),
+            image: banner.image,
+            title: banner.title || "PREMIUM",
+            subtitle: banner.subtitle || "Exclusive Collection",
+            link: banner.link || "/offers",
+          }));
+        setSideBanner(mapped[0] || null);
+      } else {
+        setSideBanner(null);
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchHomeData();
+  }, [fetchHomeData]);
 
   // Auto-slide functionality (pauses when user is dragging)
   useEffect(() => {
@@ -59,6 +316,7 @@ const MobileHome = () => {
   const onTouchStart = (e) => {
     e.stopPropagation(); // Prevent pull-to-refresh from interfering
     setTouchEnd(null);
+    setIsDraggingSlide(false);
     const touch = e.targetTouches[0];
     setTouchStart(touch.clientX);
     setDragOffset(0);
@@ -72,6 +330,9 @@ const MobileHome = () => {
     const currentX = touch.clientX;
     // Calculate difference: positive when swiping left, negative when swiping right
     const diff = touchStart - currentX;
+    if (Math.abs(diff) > 8) {
+      setIsDraggingSlide(true);
+    }
     // Constrain the drag offset to prevent over-dragging
     // Use container width for better responsiveness
     const containerWidth = e.currentTarget?.offsetWidth || 400;
@@ -111,16 +372,31 @@ const MobileHome = () => {
     setTimeout(() => {
       setAutoSlidePaused(false);
     }, 2000);
+    setTimeout(() => {
+      setIsDraggingSlide(false);
+    }, 150);
+  };
+
+  const handleSlideClick = (slide) => {
+    if (isDraggingSlide) return;
+    const target = String(slide?.link || "").trim();
+    if (!target) return;
+
+    if (/^https?:\/\//i.test(target)) {
+      window.location.href = target;
+      return;
+    }
+    navigate(target);
   };
 
   // Pull to refresh handler
   const handleRefresh = async () => {
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        toast.success("Refreshed");
-        resolve();
-      }, 1000);
-    });
+    const ok = await fetchHomeData();
+    if (!ok) {
+      toast.error("Refresh failed. Showing available data.");
+      return;
+    }
+    toast.success("Refreshed");
   };
 
   const {
@@ -178,9 +454,11 @@ const MobileHome = () => {
                     <div
                       key={index}
                       className="flex-shrink-0"
+                      onClick={() => handleSlideClick(slide)}
                       style={{
                         width: `${100 / slides.length}%`,
                         height: "100%",
+                        cursor: slide?.link ? "pointer" : "default",
                       }}>
                       <LazyImage
                         src={slide.image}
@@ -217,18 +495,22 @@ const MobileHome = () => {
               <div className="hidden lg:block lg:col-span-1 h-[400px] xl:h-[450px] rounded-2xl overflow-hidden relative bg-gray-900 group">
                 <div className="absolute inset-0 bg-gradient-to-b from-transparent to-black/90 z-10" />
                 <LazyImage
-                  src={stylishWatchImg}
-                  alt="Premium Watch"
+                  src={sideBanner?.image || stylishWatchImg}
+                  alt={sideBanner?.title || "Premium Watch"}
                   className="w-full h-full object-contain p-8 group-hover:scale-110 transition-transform duration-700"
                   onError={(e) => {
                     e.target.src = "https://via.placeholder.com/400x400?text=Premium+Watch";
                   }}
                 />
                 <div className="absolute inset-x-0 bottom-0 p-8 z-20 flex flex-col items-center text-center">
-                  <span className="text-yellow-400 font-bold text-3xl mb-2 tracking-wider drop-shadow-lg">PREMIUM</span>
-                  <p className="text-gray-300 text-sm mb-6 font-medium">Exclusive Collection</p>
+                  <span className="text-yellow-400 font-bold text-3xl mb-2 tracking-wider drop-shadow-lg">
+                    {sideBanner?.title || "PREMIUM"}
+                  </span>
+                  <p className="text-gray-300 text-sm mb-6 font-medium">
+                    {sideBanner?.subtitle || "Exclusive Collection"}
+                  </p>
                   <Link
-                    to="/offers"
+                    to={sideBanner?.link || "/offers"}
                     className="bg-white text-gray-900 font-bold py-3.5 px-10 rounded-xl w-full hover:bg-gray-100 transition-all transform hover:-translate-y-1 shadow-lg hover:shadow-xl uppercase tracking-widest text-sm"
                   >
                     Shop Now
@@ -239,16 +521,16 @@ const MobileHome = () => {
           </div>
 
           {/* Brand Logos Scroll */}
-          <BrandLogosScroll />
+          <BrandLogosScroll brands={computedBrands} />
 
           {/* Featured Vendors Section */}
-          <FeaturedVendorsSection />
+          <FeaturedVendorsSection vendors={computedVendors} />
 
           {/* Animated Banner */}
-          <AnimatedBanner />
+          <AnimatedBanner banners={promoBanners} />
 
           {/* New Arrivals */}
-          <NewArrivalsSection />
+          <NewArrivalsSection products={computedNewArrivals} />
 
 
 
@@ -277,7 +559,7 @@ const MobileHome = () => {
           </div>
 
           {/* Daily Deals */}
-          <DailyDealsSection />
+          <DailyDealsSection products={computedDailyDeals} />
 
 
 
@@ -337,7 +619,7 @@ const MobileHome = () => {
           </div>
 
           {/* Recommended for You */}
-          <RecommendedSection />
+          <RecommendedSection products={computedRecommended} />
 
           {/* Tagline Section */}
           <motion.div

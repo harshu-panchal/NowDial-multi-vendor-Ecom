@@ -263,9 +263,7 @@ const CategorySelector = ({
                               : "text-gray-900"
                           }`}
                           onClick={() => {
-                            if (!hasSubcategories) {
-                              handleCategorySelect(category.id);
-                            }
+                            handleCategorySelect(category.id);
                           }}
                           onMouseEnter={() => {
                             if (hasSubcategories) {

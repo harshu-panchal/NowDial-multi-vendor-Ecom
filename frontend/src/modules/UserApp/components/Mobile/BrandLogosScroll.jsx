@@ -2,10 +2,12 @@ import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { getCatalogBrands } from '../../data/catalogData';
 
-const BrandLogosScroll = () => {
+const BrandLogosScroll = ({ brands = null }) => {
     const navigate = useNavigate();
-    // Use existing brands, can be expanded to 8-10 when more brands are added
-    const displayBrands = getCatalogBrands().slice(0, 10);
+    const fallbackBrands = getCatalogBrands().slice(0, 10);
+    const displayBrands = Array.isArray(brands) && brands.length > 0
+        ? brands.slice(0, 10)
+        : fallbackBrands;
 
     return (
         <section className="bg-transparent w-full overflow-hidden">

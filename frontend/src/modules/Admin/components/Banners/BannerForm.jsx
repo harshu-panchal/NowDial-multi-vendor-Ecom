@@ -206,6 +206,7 @@ const BannerForm = ({ banner, onClose, onSave }) => {
                       options={[
                         { value: "hero", label: "Hero Banner" },
                         { value: "promotional", label: "Promotional Banner" },
+                        { value: "side_banner", label: "Side Banner (Home Right)" },
                       ]}
                     />
                   </div>

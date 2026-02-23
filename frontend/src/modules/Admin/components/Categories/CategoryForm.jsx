@@ -6,6 +6,7 @@ import { useCategoryStore } from "../../../../shared/store/categoryStore";
 import AnimatedSelect from "../AnimatedSelect";
 import toast from "react-hot-toast";
 import Button from "../Button";
+import { uploadAdminImage } from "../../services/adminService";
 
 const CategoryForm = ({ category, parentId, onClose, onSave }) => {
   const location = useLocation();
@@ -14,6 +15,8 @@ const CategoryForm = ({ category, parentId, onClose, onSave }) => {
     useCategoryStore();
   const isEdit = !!category;
   const isSubcategory = !isEdit && parentId !== null;
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
   const parentCategory = parentId
     ? getCategoryById(parentId)
     : category?.parentId
@@ -59,7 +62,7 @@ const CategoryForm = ({ category, parentId, onClose, onSave }) => {
     });
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
 
     if (!formData.name.trim()) {
@@ -67,16 +70,48 @@ const CategoryForm = ({ category, parentId, onClose, onSave }) => {
       return;
     }
 
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+
     try {
       if (isEdit) {
-        updateCategory(category.id, formData);
+        await updateCategory(category.id, formData);
       } else {
-        createCategory(formData);
+        await createCategory(formData);
       }
       onSave?.();
       onClose();
     } catch (error) {
       // Error handled in store
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleImageUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type?.startsWith("image/")) {
+      toast.error("Please select a valid image file");
+      return;
+    }
+
+    setIsUploadingImage(true);
+    try {
+      const response = await uploadAdminImage(file, "categories");
+      const imageUrl = response?.data?.url;
+      if (!imageUrl) {
+        toast.error("Image upload failed");
+        return;
+      }
+      setFormData((prev) => ({ ...prev, image: imageUrl }));
+      toast.success("Category image uploaded");
+    } catch (error) {
+      // Error toast handled by api interceptor
+    } finally {
+      setIsUploadingImage(false);
+      e.target.value = "";
     }
   };
 
@@ -257,16 +292,25 @@ const CategoryForm = ({ category, parentId, onClose, onSave }) => {
                 </h3>
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Image URL
+                    Upload Image
                   </label>
-                  <input
-                    type="text"
-                    name="image"
-                    value={formData.image}
-                    onChange={handleChange}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                    placeholder="data/categories/category.png"
-                  />
+                  <div className="mt-1">
+                    <label className="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors cursor-pointer text-sm font-semibold">
+                      <FiUpload />
+                      {isUploadingImage
+                        ? "Uploading..."
+                        : formData.image
+                        ? "Replace Image"
+                        : "Upload to Cloudinary"}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleImageUpload}
+                        className="hidden"
+                        disabled={isUploadingImage}
+                      />
+                    </label>
+                  </div>
                   {formData.image && (
                     <div className="mt-4">
                       <img
@@ -322,7 +366,11 @@ const CategoryForm = ({ category, parentId, onClose, onSave }) => {
                 <Button type="button" onClick={onClose} variant="secondary">
                   Cancel
                 </Button>
-                <Button type="submit" variant="primary" icon={FiSave}>
+                <Button
+                  type="submit"
+                  variant="primary"
+                  icon={FiSave}
+                  disabled={isSubmitting || isUploadingImage}>
                   {isEdit ? "Update Category" : "Create Category"}
                 </Button>
               </div>

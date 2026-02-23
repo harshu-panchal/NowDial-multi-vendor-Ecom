@@ -8,6 +8,7 @@ import Brand from '../models/Brand.model.js';
 import Vendor from '../models/Vendor.model.js';
 import Coupon from '../models/Coupon.model.js';
 import Banner from '../models/Banner.model.js';
+import Campaign from '../models/Campaign.model.js';
 
 const router = Router();
 
@@ -96,12 +97,14 @@ router.get('/similar/:id', asyncHandler(async (req, res) => {
     res.status(200).json(new ApiResponse(200, similar, 'Similar products.'));
 }));
 
-// GET /api/products/:id
-router.get('/:id', asyncHandler(async (req, res) => {
+const getProductDetail = asyncHandler(async (req, res) => {
     const product = await Product.findById(req.params.id).populate('categoryId', 'name').populate('brandId', 'name').populate('vendorId', 'storeName storeLogo rating');
     if (!product) throw new ApiError(404, 'Product not found.');
     res.status(200).json(new ApiResponse(200, product, 'Product detail.'));
-}));
+});
+
+// GET /api/products/:id
+router.get('/products/:id', getProductDetail);
 
 // GET /api/categories (public)
 router.get('/categories/all', asyncHandler(async (req, res) => {
@@ -219,6 +222,46 @@ router.get('/banners', asyncHandler(async (req, res) => {
     res.status(200).json(new ApiResponse(200, banners, 'Banners fetched.'));
 }));
 
+// GET /api/campaigns/:slug
+router.get('/campaigns/:slug', asyncHandler(async (req, res) => {
+    const slug = String(req.params.slug || '').trim().toLowerCase();
+    if (!slug) throw new ApiError(400, 'Campaign slug is required.');
+
+    const campaign = await Campaign.findOne({ slug, isActive: true });
+    if (!campaign) throw new ApiError(404, 'Campaign not found.');
+
+    const now = new Date();
+    if (campaign.startDate && campaign.startDate > now) {
+        throw new ApiError(404, 'Campaign is not active yet.');
+    }
+    if (campaign.endDate && campaign.endDate < now) {
+        throw new ApiError(404, 'Campaign has ended.');
+    }
+
+    const productIds = Array.isArray(campaign.productIds)
+        ? campaign.productIds
+            .map((value) => String(value || '').trim())
+            .filter((value) => value && /^[a-fA-F0-9]{24}$/.test(value))
+        : [];
+
+    const products = await Product.find({
+        _id: { $in: productIds },
+        isActive: true
+    })
+        .populate('categoryId', 'name')
+        .populate('brandId', 'name')
+        .populate('vendorId', 'storeName')
+        .sort({ createdAt: -1 });
+
+    const payload = {
+        ...campaign.toObject(),
+        id: String(campaign._id),
+        products,
+    };
+
+    res.status(200).json(new ApiResponse(200, payload, 'Campaign fetched.'));
+}));
+
 // GET /api/orders/track/:id (public order tracking)
 router.get('/orders/track/:id', asyncHandler(async (req, res) => {
     const { default: Order } = await import('../models/Order.model.js');
@@ -226,5 +269,9 @@ router.get('/orders/track/:id', asyncHandler(async (req, res) => {
     if (!order) throw new ApiError(404, 'Order not found.');
     res.status(200).json(new ApiResponse(200, order, 'Order tracking info.'));
 }));
+
+// Legacy support: GET /api/:id
+// Kept at the end so it does not shadow static routes like /banners, /vendors/all, etc.
+router.get('/:id', getProductDetail);
 
 export default router;

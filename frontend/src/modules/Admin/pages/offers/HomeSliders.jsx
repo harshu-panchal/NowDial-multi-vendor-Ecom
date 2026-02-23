@@ -14,18 +14,19 @@ const HomeSliders = () => {
   const isAppRoute = location.pathname.startsWith("/app");
   const { banners, initialize, createBanner, updateBanner, deleteBanner } =
     useBannerStore();
+  const [selectedBannerType, setSelectedBannerType] = useState("home_slider");
 
   const sliders = useMemo(
     () =>
       (banners || [])
-        .filter((banner) => banner.type === "home_slider")
+        .filter((banner) => banner.type === selectedBannerType)
         .map((banner) => ({
           ...banner,
           id: banner._id,
           status: banner.isActive ? "active" : "inactive",
         }))
         .sort((a, b) => (a.order || 0) - (b.order || 0)),
-    [banners]
+    [banners, selectedBannerType]
   );
 
   const [editingSlider, setEditingSlider] = useState(null);
@@ -43,7 +44,7 @@ const HomeSliders = () => {
       link: sliderData.link,
       order: sliderData.order,
       isActive: sliderData.status === "active",
-      type: "home_slider",
+      type: sliderData.type || selectedBannerType,
     };
 
     try {
@@ -143,6 +144,16 @@ const HomeSliders = () => {
       ),
     },
     {
+      key: "type",
+      label: "Type",
+      sortable: false,
+      render: (value) => (
+        <span className="text-sm text-gray-700">
+          {value === "side_banner" ? "Side Banner" : "Home Slider"}
+        </span>
+      ),
+    },
+    {
       key: "actions",
       label: "Actions",
       sortable: false,
@@ -174,23 +185,39 @@ const HomeSliders = () => {
             Home Sliders
           </h1>
           <p className="text-sm sm:text-base text-gray-600">
-            Manage homepage banner sliders
+            Manage homepage slider and right-side banners
           </p>
         </div>
-        <button
-          onClick={() =>
-            setEditingSlider({
-              title: "",
-              image: "",
-              link: "",
-              order: 1,
-              status: "active",
-            })
-          }
-          className="flex items-center gap-2 px-4 py-2 gradient-green text-white rounded-lg hover:shadow-glow-green transition-all font-semibold text-sm">
-          <FiPlus />
-          <span>Add Slider</span>
-        </button>
+        <div className="flex items-center gap-3">
+          <AnimatedSelect
+            value={selectedBannerType}
+            onChange={(e) => setSelectedBannerType(e.target.value)}
+            options={[
+              { value: "home_slider", label: "Home Sliders" },
+              { value: "side_banner", label: "Side Banners" },
+            ]}
+            className="min-w-[170px]"
+          />
+          <button
+            onClick={() =>
+              setEditingSlider({
+                title: "",
+                image: "",
+                link: "",
+                order: 1,
+                status: "active",
+                type: selectedBannerType,
+              })
+            }
+            className="flex items-center gap-2 px-4 py-2 gradient-green text-white rounded-lg hover:shadow-glow-green transition-all font-semibold text-sm">
+            <FiPlus />
+            <span>
+              {selectedBannerType === "side_banner"
+                ? "Add Side Banner"
+                : "Add Slider"}
+            </span>
+          </button>
+        </div>
       </div>
 
       <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
@@ -254,13 +281,20 @@ const HomeSliders = () => {
                 } sm:rounded-xl shadow-xl p-6 max-w-md w-full pointer-events-auto`}
                 style={{ willChange: "transform" }}>
                 <h3 className="text-lg font-bold text-gray-800 mb-4">
-                  {editingSlider.id ? "Edit Slider" : "Add Slider"}
+                  {editingSlider.id
+                    ? editingSlider.type === "side_banner"
+                      ? "Edit Side Banner"
+                      : "Edit Slider"
+                    : selectedBannerType === "side_banner"
+                    ? "Add Side Banner"
+                    : "Add Slider"}
                 </h3>
                 <form
                   onSubmit={(e) => {
                     e.preventDefault();
                     const formData = new FormData(e.target);
                     handleSave({
+                      type: formData.get("type"),
                       title: formData.get("title"),
                       image: formData.get("image"),
                       link: formData.get("link"),
@@ -269,6 +303,21 @@ const HomeSliders = () => {
                     });
                   }}
                   className="space-y-4">
+                  <AnimatedSelect
+                    name="type"
+                    value={editingSlider.type || selectedBannerType}
+                    onChange={(e) =>
+                      setEditingSlider({
+                        ...editingSlider,
+                        type: e.target.value,
+                      })
+                    }
+                    options={[
+                      { value: "home_slider", label: "Home Slider" },
+                      { value: "side_banner", label: "Side Banner (Home Right)" },
+                    ]}
+                    required
+                  />
                   <input
                     type="text"
                     name="title"

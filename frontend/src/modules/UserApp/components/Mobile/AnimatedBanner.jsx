@@ -8,57 +8,79 @@ import sneakersImg from "../../../../../data/products/sneakers.png";
 import watchImg from "../../../../../data/products/stylish watch.png";
 import sunglassImg from "../../../../../data/products/sunglass.png";
 
-const AnimatedBanner = () => {
+const defaultBanners = [
+  {
+    id: 1,
+    title: "Flash Sale",
+    subtitle: "Limited Time Offer",
+    discount: "Up to 50% OFF",
+    description: "Shop now before it ends!",
+    gradient: "from-red-500 via-pink-500 to-orange-500",
+    link: "/flash-sale",
+    icon: FiZap,
+    heroImage: sneakersImg,
+  },
+  {
+    id: 2,
+    title: "Daily Deals",
+    subtitle: "New Deals Every Day",
+    discount: "Save 30%",
+    description: "Check out today's best deals",
+    gradient: "from-blue-500 via-purple-500 to-indigo-500",
+    link: "/daily-deals",
+    icon: FiTag,
+    heroImage: sunglassImg,
+  },
+  {
+    id: 3,
+    title: "Special Offers",
+    subtitle: "Exclusive Discounts",
+    discount: "Up to 40% OFF",
+    description: "Don't miss out!",
+    gradient: "from-green-500 via-teal-500 to-cyan-500",
+    link: "/offers",
+    icon: FiTag,
+    heroImage: watchImg,
+  },
+];
+
+const gradientPalette = [
+  "from-red-500 via-pink-500 to-orange-500",
+  "from-blue-500 via-purple-500 to-indigo-500",
+  "from-green-500 via-teal-500 to-cyan-500",
+];
+
+const AnimatedBanner = ({ banners = null }) => {
   const [currentBanner, setCurrentBanner] = useState(0);
 
-  const banners = [
-    {
-      id: 1,
-      title: "Flash Sale",
-      subtitle: "Limited Time Offer",
-      discount: "Up to 50% OFF",
-      description: "Shop now before it ends!",
-      gradient: "from-red-500 via-pink-500 to-orange-500",
-      link: "/flash-sale",
-      icon: FiZap,
-      heroImage: sneakersImg,
-    },
-    {
-      id: 2,
-      title: "Daily Deals",
-      subtitle: "New Deals Every Day",
-      discount: "Save 30%",
-      description: "Check out today's best deals",
-      gradient: "from-blue-500 via-purple-500 to-indigo-500",
-      link: "/daily-deals",
-      icon: FiTag,
-      heroImage: sunglassImg,
-    },
-    {
-      id: 3,
-      title: "Special Offers",
-      subtitle: "Exclusive Discounts",
-      discount: "Up to 40% OFF",
-      description: "Don't miss out!",
-      gradient: "from-green-500 via-teal-500 to-cyan-500",
-      link: "/offers",
-      icon: FiTag,
-      heroImage: watchImg,
-    },
-  ];
+  const resolvedBanners =
+    Array.isArray(banners) && banners.length > 0
+      ? banners.map((banner, index) => ({
+          id: banner.id || `banner-${index}`,
+          title: banner.title || "Special Offer",
+          subtitle: banner.subtitle || "Limited Time",
+          discount: banner.discount || "Shop Now",
+          description: banner.description || "",
+          gradient:
+            banner.gradient || gradientPalette[index % gradientPalette.length],
+          link: banner.link || "/offers",
+          icon: banner.icon || FiTag,
+          heroImage: banner.image || banner.heroImage || watchImg,
+        }))
+      : defaultBanners;
 
   useEffect(() => {
     const interval = setInterval(() => {
-      setCurrentBanner((prev) => (prev + 1) % banners.length);
+      setCurrentBanner((prev) => (prev + 1) % resolvedBanners.length);
     }, 4000);
     return () => clearInterval(interval);
-  }, [banners.length]);
+  }, [resolvedBanners.length]);
 
   return (
     <div className="px-4 py-3">
       <div className="relative w-full h-32 rounded-2xl overflow-hidden shadow-xl">
         <AnimatePresence mode="wait">
-          {banners.map((banner, index) => {
+          {resolvedBanners.map((banner, index) => {
             if (index !== currentBanner) return null;
             const Icon = banner.icon;
 
@@ -223,7 +245,7 @@ const AnimatedBanner = () => {
 
         {/* Indicator Dots */}
         <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5 z-20">
-          {banners.map((_, index) => (
+          {resolvedBanners.map((_, index) => (
             <button
               key={index}
               onClick={() => setCurrentBanner(index)}

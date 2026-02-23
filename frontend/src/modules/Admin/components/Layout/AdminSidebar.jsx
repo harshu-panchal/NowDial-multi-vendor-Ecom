@@ -38,6 +38,7 @@ const iconMap = {
   Customers: FiUsers,
   "Delivery Management": FiTruck,
   "Offers & Sliders": FiImage,
+  Banners: FiImage,
   "Promo Codes": FiPercent,
   Notifications: FiBell,
   "Support Desk": FiMessageCircle,
