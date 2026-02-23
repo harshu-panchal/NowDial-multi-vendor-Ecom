@@ -4,6 +4,13 @@ import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { FiMail, FiLock, FiEye, FiEyeOff, FiPhone } from 'react-icons/fi';
 import { motion } from 'framer-motion';
 import { useAuthStore } from '../../../shared/store/authStore';
+import { useCartStore } from '../../../shared/store/useStore';
+import { useWishlistStore } from '../../../shared/store/wishlistStore';
+import {
+  clearPostLoginRedirect,
+  consumePostLoginAction,
+  getPostLoginRedirect,
+} from '../../../shared/utils/postLoginAction';
 import { isValidEmail } from '../../../shared/utils/helpers';
 import toast from 'react-hot-toast';
 import MobileLayout from '../components/Layout/MobileLayout';
@@ -22,13 +29,30 @@ const MobileLogin = () => {
     formState: { errors },
   } = useForm();
 
-  const from = location.state?.from?.pathname || '/home';
+  const storedFrom = getPostLoginRedirect();
+  const from = location.state?.from?.pathname || storedFrom || '/home';
+
+  const replayPendingAction = () => {
+    const action = consumePostLoginAction();
+    if (!action?.type) return;
+
+    if (action.type === 'cart:add' && action.payload) {
+      useCartStore.getState().addItem(action.payload);
+      return;
+    }
+
+    if (action.type === 'wishlist:add' && action.payload) {
+      useWishlistStore.getState().addItem(action.payload);
+    }
+  };
 
   const onSubmit = async (data) => {
     try {
       await login(data.email, data.password, rememberMe);
+      replayPendingAction();
       toast.success('Login successful!');
-      navigate(from, { replace: true });
+      clearPostLoginRedirect();
+      navigate(from === '/login' ? '/home' : from, { replace: true });
     } catch (error) {
       const backendMessage = String(
         error?.response?.data?.message ||

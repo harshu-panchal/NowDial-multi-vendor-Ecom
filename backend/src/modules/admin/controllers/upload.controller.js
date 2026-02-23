@@ -1,7 +1,10 @@
 import asyncHandler from '../../../utils/asyncHandler.js';
 import ApiResponse from '../../../utils/ApiResponse.js';
 import ApiError from '../../../utils/ApiError.js';
-import { uploadLocalFileToCloudinaryAndCleanup } from '../../../services/upload.service.js';
+import {
+    uploadLocalFileToCloudinaryAndCleanup,
+    cleanupLocalFiles,
+} from '../../../services/upload.service.js';
 
 /**
  * @desc    Upload single image to Cloudinary via temp local file
@@ -16,8 +19,13 @@ export const uploadImage = asyncHandler(async (req, res) => {
     const folder = (req.body?.folder || 'general').toString().trim() || 'general';
     const publicId = req.body?.publicId ? String(req.body.publicId).trim() : undefined;
 
-    const uploaded = await uploadLocalFileToCloudinaryAndCleanup(req.file.path, folder, publicId);
-    return res.status(201).json(
-        new ApiResponse(201, uploaded, 'Image uploaded successfully')
-    );
+    try {
+        const uploaded = await uploadLocalFileToCloudinaryAndCleanup(req.file.path, folder, publicId);
+        return res.status(201).json(
+            new ApiResponse(201, uploaded, 'Image uploaded successfully')
+        );
+    } catch (error) {
+        await cleanupLocalFiles([req.file.path]);
+        throw error;
+    }
 });

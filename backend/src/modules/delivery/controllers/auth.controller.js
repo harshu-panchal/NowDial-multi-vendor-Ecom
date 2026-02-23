@@ -6,6 +6,7 @@ import Admin from '../../../models/Admin.model.js';
 import { generateTokens } from '../../../utils/generateToken.js';
 import { createNotification } from '../../../services/notification.service.js';
 import { sendEmail } from '../../../services/email.service.js';
+import { cleanupLocalFiles } from '../../../services/upload.service.js';
 import {
     clearRefreshSession,
     decodeRefreshTokenOrThrow,
@@ -30,48 +31,61 @@ export const register = asyncHandler(async (req, res) => {
     }
 
     const normalizedEmail = String(email || '').trim().toLowerCase();
-    const existing = await DeliveryBoy.findOne({ email: normalizedEmail });
-    if (existing) throw new ApiError(409, 'Email already registered.');
+    let deliveryBoy = null;
 
-    const deliveryBoy = await DeliveryBoy.create({
-        name: String(name || '').trim(),
-        email: normalizedEmail,
-        password,
-        phone: String(phone || '').trim(),
-        address: String(address || '').trim(),
-        vehicleType: String(vehicleType || '').trim(),
-        vehicleNumber: String(vehicleNumber || '').trim(),
-        documents: {
-            drivingLicense: getUploadedPath(drivingLicenseFile),
-            aadharCard: getUploadedPath(aadharCardFile),
-        },
-        applicationStatus: 'pending',
-        isActive: false,
-        isAvailable: false,
-        status: 'offline',
-    });
+    try {
+        const existing = await DeliveryBoy.findOne({ email: normalizedEmail });
+        if (existing) throw new ApiError(409, 'Email already registered.');
 
-    const admins = await Admin.find({ isActive: true }).select('_id');
-    await Promise.all(
-        admins.map((admin) =>
-            createNotification({
-                recipientId: admin._id,
-                recipientType: 'admin',
-                title: 'New Delivery Registration',
-                message: `${deliveryBoy.name} has registered as delivery partner and is awaiting approval.`,
-                type: 'system',
-                data: {
-                    deliveryBoyId: String(deliveryBoy._id),
-                    deliveryEmail: deliveryBoy.email,
-                    applicationStatus: deliveryBoy.applicationStatus,
-                },
-            })
-        )
-    );
+        deliveryBoy = await DeliveryBoy.create({
+            name: String(name || '').trim(),
+            email: normalizedEmail,
+            password,
+            phone: String(phone || '').trim(),
+            address: String(address || '').trim(),
+            vehicleType: String(vehicleType || '').trim(),
+            vehicleNumber: String(vehicleNumber || '').trim(),
+            documents: {
+                drivingLicense: getUploadedPath(drivingLicenseFile),
+                aadharCard: getUploadedPath(aadharCardFile),
+            },
+            applicationStatus: 'pending',
+            isActive: false,
+            isAvailable: false,
+            status: 'offline',
+        });
 
-    res.status(201).json(
-        new ApiResponse(201, { email: deliveryBoy.email }, 'Registration submitted. Awaiting admin approval.')
-    );
+        const admins = await Admin.find({ isActive: true }).select('_id');
+        await Promise.all(
+            admins.map((admin) =>
+                createNotification({
+                    recipientId: admin._id,
+                    recipientType: 'admin',
+                    title: 'New Delivery Registration',
+                    message: `${deliveryBoy.name} has registered as delivery partner and is awaiting approval.`,
+                    type: 'system',
+                    data: {
+                        deliveryBoyId: String(deliveryBoy._id),
+                        deliveryEmail: deliveryBoy.email,
+                        applicationStatus: deliveryBoy.applicationStatus,
+                    },
+                })
+            )
+        );
+
+        res.status(201).json(
+            new ApiResponse(201, { email: deliveryBoy.email }, 'Registration submitted. Awaiting admin approval.')
+        );
+    } catch (error) {
+        const shouldCleanupLocalDocs = !deliveryBoy;
+        if (shouldCleanupLocalDocs) {
+            await cleanupLocalFiles([
+                drivingLicenseFile?.path,
+                aadharCardFile?.path,
+            ]);
+        }
+        throw error;
+    }
 });
 
 // POST /api/delivery/auth/forgot-password

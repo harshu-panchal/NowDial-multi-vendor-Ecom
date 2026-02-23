@@ -4,20 +4,27 @@ import { useWishlistStore } from "../../../../shared/store/wishlistStore";
 import { useAuthStore } from "../../../../shared/store/authStore";
 import { appLogo } from "../../../../data/logos";
 import SearchBar from "../../../../shared/components/SearchBar";
-import { FiHeart, FiShoppingBag, FiUser, FiLogOut, FiGrid } from "react-icons/fi";
+import { FiHeart, FiShoppingBag, FiUser, FiLogOut, FiGrid, FiBell } from "react-icons/fi";
 import { HiOutlineUserCircle } from "react-icons/hi";
 import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useUserNotificationStore } from "../../store/userNotificationStore";
 
 const DesktopHeader = () => {
     const navigate = useNavigate();
     const { user, isAuthenticated, logout } = useAuthStore();
     const itemCount = useCartStore((state) => state.getItemCount());
     const wishlistCount = useWishlistStore((state) => state.getItemCount());
+    const unreadCount = useUserNotificationStore((state) => state.unreadCount);
+    const ensureHydrated = useUserNotificationStore((state) => state.ensureHydrated);
     const toggleCart = useUIStore((state) => state.toggleCart);
 
     const [showUserMenu, setShowUserMenu] = useState(false);
     const userMenuRef = useRef(null);
+
+    useEffect(() => {
+        ensureHydrated();
+    }, [ensureHydrated, isAuthenticated]);
 
     useEffect(() => {
         const handleClickOutside = (event) => {
@@ -90,6 +97,19 @@ const DesktopHeader = () => {
                             </span>
                         )}
                     </button>
+
+                    {/* Notifications */}
+                    <Link
+                        to={isAuthenticated ? "/notifications" : "/login"}
+                        className="relative p-2 text-gray-600 hover:text-primary-600 transition-colors"
+                    >
+                        <FiBell className="text-2xl" />
+                        {isAuthenticated && unreadCount > 0 && (
+                            <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-red-500 text-white text-xs font-bold flex items-center justify-center">
+                                {unreadCount > 9 ? "9+" : unreadCount}
+                            </span>
+                        )}
+                    </Link>
 
                     {/* User Menu */}
                     {isAuthenticated ? (

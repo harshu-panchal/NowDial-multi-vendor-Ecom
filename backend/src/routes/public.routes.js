@@ -39,7 +39,7 @@ const listProducts = asyncHandler(async (req, res) => {
         q,
         sort = 'newest',
         flashSale,
-        isNew,
+        isNewArrival,
         minPrice,
         maxPrice
     } = req.query;
@@ -55,7 +55,7 @@ const listProducts = asyncHandler(async (req, res) => {
     if (brand) filter.brandId = brand;
     if (vendor) filter.vendorId = vendor;
     if (flashSale === 'true') filter.flashSale = true;
-    if (isNew === 'true') filter.isNew = true;
+    if (isNewArrival === 'true') filter.isNewArrival = true;
     if (minPrice || maxPrice) filter.price = { ...(minPrice && { $gte: Number(minPrice) }), ...(maxPrice && { $lte: Number(maxPrice) }) };
     const searchQuery = String(search || q || '').trim();
     if (searchQuery) filter.$text = { $search: searchQuery };
@@ -79,7 +79,7 @@ router.get('/flash-sale', asyncHandler(async (req, res) => {
 
 // GET /api/products/new-arrivals
 router.get('/new-arrivals', asyncHandler(async (req, res) => {
-    const products = await Product.find({ isActive: true, isNew: true }).sort({ createdAt: -1 }).limit(20);
+    const products = await Product.find({ isActive: true, isNewArrival: true }).sort({ createdAt: -1 }).limit(20);
     res.status(200).json(new ApiResponse(200, products, 'New arrivals.'));
 }));
 

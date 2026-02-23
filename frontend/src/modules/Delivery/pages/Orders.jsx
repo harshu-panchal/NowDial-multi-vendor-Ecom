@@ -11,6 +11,7 @@ const DeliveryOrders = () => {
   const navigate = useNavigate();
   const {
     orders,
+    ordersPagination,
     isLoadingOrders,
     isUpdatingOrderStatus,
     fetchOrders,
@@ -19,11 +20,13 @@ const DeliveryOrders = () => {
   } = useDeliveryAuthStore();
   const [filter, setFilter] = useState('all'); // all, pending, in-transit, completed
   const [loadFailed, setLoadFailed] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const PAGE_SIZE = 20;
 
-  const loadOrders = async () => {
+  const loadOrders = async (page = currentPage) => {
     try {
       setLoadFailed(false);
-      await fetchOrders();
+      await fetchOrders({ page, limit: PAGE_SIZE });
     } catch {
       setLoadFailed(true);
       // Error toast handled by API interceptor.
@@ -31,8 +34,8 @@ const DeliveryOrders = () => {
   };
 
   useEffect(() => {
-    loadOrders();
-  }, [fetchOrders]);
+    loadOrders(currentPage);
+  }, [fetchOrders, currentPage]);
 
   const filteredOrders = orders.filter((order) => {
     if (filter === 'all') return true;
@@ -79,12 +82,27 @@ const DeliveryOrders = () => {
   };
 
   const handleCompleteOrder = async (orderId) => {
+    const otp = window.prompt('Enter 6-digit delivery OTP shared by customer:');
+    if (otp === null) return;
+    if (!/^\d{6}$/.test(String(otp).trim())) {
+      toast.error('Please enter a valid 6-digit OTP');
+      return;
+    }
+
     try {
-      await completeOrder(orderId);
+      await completeOrder(orderId, String(otp).trim());
       toast.success('Order marked as delivered');
     } catch {
       // Error toast handled by API interceptor.
     }
+  };
+
+  const handlePreviousPage = () => {
+    setCurrentPage((prev) => Math.max(1, prev - 1));
+  };
+
+  const handleNextPage = () => {
+    setCurrentPage((prev) => Math.min(Number(ordersPagination?.pages || 1), prev + 1));
   };
 
   return (
@@ -97,7 +115,9 @@ const DeliveryOrders = () => {
           className="flex items-center justify-between"
         >
           <h1 className="text-2xl font-bold text-gray-800">Orders</h1>
-          <span className="text-sm text-gray-600">{filteredOrders.length} orders</span>
+          <span className="text-sm text-gray-600">
+            {Number(ordersPagination?.total || filteredOrders.length)} orders
+          </span>
         </motion.div>
 
         {/* Filter Tabs */}
@@ -110,7 +130,10 @@ const DeliveryOrders = () => {
           {['all', 'pending', 'in-transit', 'completed'].map((tab) => (
             <button
               key={tab}
-              onClick={() => setFilter(tab)}
+              onClick={() => {
+                setFilter(tab);
+                setCurrentPage(1);
+              }}
               className={`px-4 py-2 rounded-full text-sm font-semibold whitespace-nowrap transition-colors ${
                 filter === tab
                   ? 'bg-primary-600 text-white'
@@ -250,6 +273,28 @@ const DeliveryOrders = () => {
             ))
           )}
         </div>
+
+        {!isLoadingOrders && !loadFailed && Number(ordersPagination?.pages || 1) > 1 && (
+          <div className="flex items-center justify-between bg-white rounded-xl border border-gray-200 px-4 py-3">
+            <button
+              onClick={handlePreviousPage}
+              disabled={currentPage <= 1}
+              className="px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Previous
+            </button>
+            <span className="text-sm text-gray-600">
+              Page {currentPage} of {Number(ordersPagination?.pages || 1)}
+            </span>
+            <button
+              onClick={handleNextPage}
+              disabled={currentPage >= Number(ordersPagination?.pages || 1)}
+              className="px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Next
+            </button>
+          </div>
+        )}
       </div>
     </PageTransition>
   );

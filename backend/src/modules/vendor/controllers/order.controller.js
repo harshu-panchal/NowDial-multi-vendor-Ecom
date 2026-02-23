@@ -79,17 +79,38 @@ export const updateOrderStatus = asyncHandler(async (req, res) => {
     );
     await order.save();
 
-    await createNotification({
-        recipientId: req.user.id,
-        recipientType: 'vendor',
-        title: 'Order status updated',
-        message: `Order ${order.orderId || order._id} moved to ${status}.`,
-        type: 'order',
-        data: {
-            orderId: String(order.orderId || order._id),
-            status: String(status),
-        },
-    });
+    const notificationTasks = [];
+    if (order.userId) {
+        notificationTasks.push(
+            createNotification({
+                recipientId: order.userId,
+                recipientType: 'user',
+                title: 'Order status updated',
+                message: `Your order ${order.orderId || order._id} is now ${status}.`,
+                type: 'order',
+                data: {
+                    orderId: String(order.orderId || order._id),
+                    status: String(status),
+                },
+            })
+        );
+    }
+
+    notificationTasks.push(
+        createNotification({
+            recipientId: req.user.id,
+            recipientType: 'vendor',
+            title: 'Order status updated',
+            message: `Order ${order.orderId || order._id} moved to ${status}.`,
+            type: 'order',
+            data: {
+                orderId: String(order.orderId || order._id),
+                status: String(status),
+            },
+        })
+    );
+
+    await Promise.allSettled(notificationTasks);
 
     res.status(200).json(new ApiResponse(200, order, 'Order status updated.'));
 });
@@ -97,7 +118,7 @@ export const updateOrderStatus = asyncHandler(async (req, res) => {
 // GET /api/vendor/earnings
 export const getEarnings = asyncHandler(async (req, res) => {
     const commissionDocs = await Commission.find({ vendorId: req.user.id })
-        .populate('orderId', 'orderId')
+        .populate('orderId', 'orderId status')
         .sort({ createdAt: -1 });
     const settlements = await Settlement.find({ vendorId: req.user.id }).sort({ createdAt: -1 });
 
@@ -113,13 +134,31 @@ export const getEarnings = asyncHandler(async (req, res) => {
     });
 
     const summary = commissions.reduce((acc, c) => {
-        acc.totalEarnings += Number(c.vendorEarnings || 0);
-        acc.totalCommission += Number(c.commission || 0);
-        acc.totalOrders += 1;
-        if (c.status === 'pending') acc.pendingEarnings += Number(c.vendorEarnings || 0);
-        if (c.status === 'paid') acc.paidEarnings += Number(c.vendorEarnings || 0);
+        const status = String(c.status || 'pending');
+        const orderStatus = String(c.orderId?.status || '').toLowerCase();
+        const effectiveStatus = orderStatus === 'cancelled' ? 'cancelled' : status;
+        const earnings = Number(c.vendorEarnings || 0);
+        const commissionAmount = Number(c.commission || 0);
+
+        // Cancelled commissions should not contribute to active earnings totals.
+        if (effectiveStatus !== 'cancelled') {
+            acc.totalEarnings += earnings;
+            acc.totalCommission += commissionAmount;
+            acc.totalOrders += 1;
+        }
+
+        if (effectiveStatus === 'pending') acc.pendingEarnings += earnings;
+        if (effectiveStatus === 'paid') acc.paidEarnings += earnings;
+        if (effectiveStatus === 'cancelled') acc.cancelledEarnings += earnings;
         return acc;
-    }, { totalEarnings: 0, pendingEarnings: 0, paidEarnings: 0, totalCommission: 0, totalOrders: 0 });
+    }, {
+        totalEarnings: 0,
+        pendingEarnings: 0,
+        paidEarnings: 0,
+        cancelledEarnings: 0,
+        totalCommission: 0,
+        totalOrders: 0
+    });
 
     res.status(200).json(new ApiResponse(200, { summary, commissions, settlements }, 'Earnings fetched.'));
 });

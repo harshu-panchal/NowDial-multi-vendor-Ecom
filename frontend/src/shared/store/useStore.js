@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import toast from "react-hot-toast";
+import { useAuthStore } from "./authStore";
+import { setPostLoginAction, setPostLoginRedirect } from "../utils/postLoginAction";
 
 const normalizeVariantPart = (value) => String(value || "").trim().toLowerCase();
 const getVariantSignature = (variant = {}) =>
@@ -8,16 +10,44 @@ const getVariantSignature = (variant = {}) =>
 const getCartLineKey = (id, variant = {}) =>
   `${String(id)}::${getVariantSignature(variant)}`;
 
+const redirectToLogin = () => {
+  if (typeof window === "undefined") return;
+  const currentPath = window.location.pathname || "/home";
+  if (currentPath === "/login") return;
+
+  const fromPath = `${window.location.pathname || ""}${window.location.search || ""}${window.location.hash || ""}`;
+  setPostLoginRedirect(fromPath || "/home");
+
+  // SPA-friendly redirect without full page reload.
+  const nextState = { from: { pathname: fromPath || "/home" } };
+  window.history.pushState(nextState, "", "/login");
+  window.dispatchEvent(new PopStateEvent("popstate", { state: nextState }));
+};
+
 // Cart Store
 export const useCartStore = create(
   persist(
     (set, get) => ({
       items: [],
       addItem: (item) => {
+        const authState = useAuthStore.getState();
+        if (!authState?.isAuthenticated) {
+          setPostLoginAction({
+            type: "cart:add",
+            payload: {
+              ...item,
+              quantity: Number(item?.quantity) > 0 ? Number(item.quantity) : 1,
+            },
+          });
+          toast.error("Please login to add products to cart");
+          redirectToLogin();
+          return false;
+        }
+
         const availableStock = Number(item?.stockQuantity);
         if (Number.isFinite(availableStock) && availableStock <= 0) {
           toast.error("Product is out of stock");
-          return;
+          return false;
         }
 
         const lineKey = getCartLineKey(item.id, item.variant);
@@ -32,11 +62,11 @@ export const useCartStore = create(
         // If stock quantity is known on the item payload, keep local guard.
         if (Number.isFinite(availableStock) && newQuantity > availableStock) {
           toast.error(`Only ${availableStock} items available in stock`);
-          return;
+          return false;
         }
 
         if (newQuantity <= 0) {
-          return;
+          return false;
         }
 
         // Include vendor information from product
@@ -86,6 +116,7 @@ export const useCartStore = create(
         // Trigger cart animation
         const { triggerCartAnimation } = useUIStore.getState();
         triggerCartAnimation();
+        return true;
       },
       removeItem: (id, variant = null) =>
         set((state) => ({

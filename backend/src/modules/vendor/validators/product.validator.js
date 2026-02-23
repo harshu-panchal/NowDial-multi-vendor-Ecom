@@ -12,7 +12,7 @@ export const createProductSchema = Joi.object({
     lowStockThreshold: Joi.number().integer().min(0).default(10),
     taxRate: Joi.number().min(0).max(100).default(18),
     flashSale: Joi.boolean().default(false),
-    isNew: Joi.boolean().default(false),
+    isNewArrival: Joi.boolean().default(false),
     tags: Joi.array().items(Joi.string()).optional(),
     faqs: Joi.array().items(
         Joi.object({

@@ -5,9 +5,12 @@ import Order from '../../../models/Order.model.js';
 import Product from '../../../models/Product.model.js';
 import Coupon from '../../../models/Coupon.model.js';
 import Commission from '../../../models/Commission.model.js';
+import ReturnRequest from '../../../models/ReturnRequest.model.js';
+import Admin from '../../../models/Admin.model.js';
 import { generateOrderId } from '../../../utils/generateOrderId.js';
 import { generateTrackingNumber } from '../../../utils/generateTrackingNumber.js';
 import mongoose from 'mongoose';
+import { createNotification } from '../../../services/notification.service.js';
 
 const normalizeVariantPart = (value) => String(value || '').trim().toLowerCase();
 
@@ -323,5 +326,198 @@ export const cancelOrder = asyncHandler(async (req, res) => {
         await product.save();
     }
 
+    // Reverse vendor earnings visibility for this order.
+    // Keep it idempotent by only updating commissions not already cancelled.
+    await Commission.updateMany(
+        {
+            orderId: order._id,
+            status: { $ne: 'cancelled' },
+        },
+        {
+            $set: {
+                status: 'cancelled',
+                paidAt: null,
+                settlementId: null,
+            },
+        }
+    );
+
     res.status(200).json(new ApiResponse(200, null, 'Order cancelled successfully.'));
+});
+
+const normalizeReturnRequest = (requestDoc) => {
+    const request = typeof requestDoc?.toObject === 'function' ? requestDoc.toObject() : requestDoc;
+    const orderOrderId = request?.orderId?.orderId || '';
+    const orderRefId = request?.orderId?._id || request?.orderId || null;
+    return {
+        ...request,
+        id: String(request?._id || ''),
+        orderId: orderOrderId || String(orderRefId || ''),
+        orderRefId: orderRefId ? String(orderRefId) : null,
+        requestDate: request?.createdAt,
+    };
+};
+
+// POST /api/user/orders/:id/returns
+export const createReturnRequest = asyncHandler(async (req, res) => {
+    const order = await Order.findOne({ orderId: req.params.id, userId: req.user.id });
+    if (!order) throw new ApiError(404, 'Order not found.');
+    if (order.status !== 'delivered') {
+        throw new ApiError(400, 'Return can only be requested for delivered orders.');
+    }
+
+    const requestedVendorId = String(req.body.vendorId || '').trim();
+    const orderItems = Array.isArray(order.items) ? order.items : [];
+    const orderVendorIds = [...new Set(orderItems.map((item) => String(item?.vendorId || '')).filter(Boolean))];
+
+    let vendorId = requestedVendorId;
+    if (!vendorId) {
+        if (orderVendorIds.length > 1) {
+            throw new ApiError(400, 'vendorId is required for multi-vendor orders.');
+        }
+        vendorId = orderVendorIds[0] || '';
+    }
+    if (!vendorId) {
+        throw new ApiError(400, 'Unable to resolve vendor for return request.');
+    }
+
+    const vendorScopedItems = orderItems.filter((item) => String(item?.vendorId || '') === vendorId);
+    if (vendorScopedItems.length === 0) {
+        throw new ApiError(400, 'Selected vendor has no items in this order.');
+    }
+
+    const requestedItems = Array.isArray(req.body.items) ? req.body.items : [];
+    let normalizedItems = [];
+
+    if (requestedItems.length > 0) {
+        normalizedItems = requestedItems.map((inputItem) => {
+            const productId = String(inputItem?.productId || '');
+            const orderItem = vendorScopedItems.find((it) => String(it?.productId || '') === productId);
+            if (!orderItem) {
+                throw new ApiError(400, `Product ${productId} is not valid for this return request.`);
+            }
+
+            const requestedQty = Number(inputItem?.quantity || 0);
+            const maxQty = Number(orderItem?.quantity || 0);
+            if (!Number.isFinite(requestedQty) || requestedQty <= 0 || requestedQty > maxQty) {
+                throw new ApiError(400, `Invalid quantity for product ${orderItem.name || productId}.`);
+            }
+
+            return {
+                productId: orderItem.productId,
+                name: orderItem.name,
+                quantity: requestedQty,
+                reason: String(inputItem?.reason || req.body.reason || '').trim(),
+            };
+        });
+    } else {
+        normalizedItems = vendorScopedItems.map((item) => ({
+            productId: item.productId,
+            name: item.name,
+            quantity: Number(item.quantity || 1),
+            reason: String(req.body.reason || '').trim(),
+        }));
+    }
+
+    const existingOpen = await ReturnRequest.findOne({
+        orderId: order._id,
+        userId: req.user.id,
+        vendorId,
+        status: { $in: ['pending', 'approved', 'processing'] },
+    });
+    if (existingOpen) {
+        throw new ApiError(409, 'An active return request already exists for this vendor in the selected order.');
+    }
+
+    const refundAmount = normalizedItems.reduce((sum, item) => {
+        const orderItem = vendorScopedItems.find((it) => String(it?.productId || '') === String(item.productId || ''));
+        const unitPrice = Number(orderItem?.price || 0);
+        return sum + unitPrice * Number(item.quantity || 0);
+    }, 0);
+
+    const request = await ReturnRequest.create({
+        orderId: order._id,
+        userId: req.user.id,
+        vendorId,
+        items: normalizedItems,
+        reason: String(req.body.reason || '').trim(),
+        status: 'pending',
+        refundAmount: Number(refundAmount.toFixed(2)),
+        refundStatus: 'pending',
+        images: Array.isArray(req.body.images) ? req.body.images : [],
+    });
+
+    const admins = await Admin.find({ isActive: true }).select('_id').lean();
+    await Promise.all(
+        admins.map((admin) =>
+            createNotification({
+                recipientId: admin._id,
+                recipientType: 'admin',
+                title: 'New Return Request',
+                message: `Order ${order.orderId} has a new return request awaiting review.`,
+                type: 'order',
+                data: {
+                    returnRequestId: String(request._id),
+                    orderId: String(order.orderId),
+                    vendorId: String(vendorId),
+                },
+            })
+        )
+    );
+
+    await createNotification({
+        recipientId: vendorId,
+        recipientType: 'vendor',
+        title: 'New Return Request',
+        message: `Order ${order.orderId} has a return request from customer.`,
+        type: 'order',
+        data: {
+            returnRequestId: String(request._id),
+            orderId: String(order.orderId),
+        },
+    });
+
+    const populated = await ReturnRequest.findById(request._id)
+        .populate('orderId', 'orderId total createdAt')
+        .populate('vendorId', 'storeName email');
+
+    res.status(201).json(new ApiResponse(201, normalizeReturnRequest(populated), 'Return request submitted successfully.'));
+});
+
+// GET /api/user/returns
+export const getUserReturnRequests = asyncHandler(async (req, res) => {
+    const { page = 1, limit = 20, status } = req.query;
+    const numericPage = Math.max(1, Number(page) || 1);
+    const numericLimit = Math.max(1, Number(limit) || 20);
+    const filter = { userId: req.user.id };
+    if (status && status !== 'all') filter.status = status;
+
+    const [requests, total] = await Promise.all([
+        ReturnRequest.find(filter)
+            .populate('orderId', 'orderId total createdAt')
+            .populate('vendorId', 'storeName email')
+            .sort({ createdAt: -1 })
+            .skip((numericPage - 1) * numericLimit)
+            .limit(numericLimit),
+        ReturnRequest.countDocuments(filter),
+    ]);
+
+    res.status(200).json(new ApiResponse(200, {
+        returnRequests: requests.map(normalizeReturnRequest),
+        pagination: {
+            total,
+            page: numericPage,
+            limit: numericLimit,
+            pages: Math.ceil(total / numericLimit),
+        },
+    }, 'Return requests fetched.'));
+});
+
+// GET /api/user/returns/:id
+export const getUserReturnRequestById = asyncHandler(async (req, res) => {
+    const request = await ReturnRequest.findOne({ _id: req.params.id, userId: req.user.id })
+        .populate('orderId', 'orderId total createdAt')
+        .populate('vendorId', 'storeName email');
+    if (!request) throw new ApiError(404, 'Return request not found.');
+    res.status(200).json(new ApiResponse(200, normalizeReturnRequest(request), 'Return request fetched.'));
 });

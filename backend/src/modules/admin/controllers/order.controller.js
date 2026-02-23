@@ -4,6 +4,7 @@ import ApiError from '../../../utils/ApiError.js';
 import Order from '../../../models/Order.model.js';
 import DeliveryBoy from '../../../models/DeliveryBoy.model.js';
 import User from '../../../models/User.model.js';
+import Commission from '../../../models/Commission.model.js';
 import { createNotification } from '../../../services/notification.service.js';
 
 // GET /api/admin/orders
@@ -102,6 +103,87 @@ export const updateOrderStatus = asyncHandler(async (req, res) => {
     ).populate('userId', 'name email');
 
     if (!order) throw new ApiError(404, 'Order not found.');
+
+    if (status === 'cancelled') {
+        // Reverse vendor earnings visibility for this order.
+        // Keep it idempotent by only updating commissions not already cancelled.
+        await Commission.updateMany(
+            {
+                orderId: order._id,
+                status: { $ne: 'cancelled' },
+            },
+            {
+                $set: {
+                    status: 'cancelled',
+                    paidAt: null,
+                    settlementId: null,
+                },
+            }
+        );
+    }
+
+    const notificationTasks = [];
+
+    if (order.userId) {
+        notificationTasks.push(
+            createNotification({
+                recipientId: order.userId,
+                recipientType: 'user',
+                title: 'Order status updated',
+                message: `Your order ${order.orderId} is now ${status}.`,
+                type: 'order',
+                data: {
+                    orderId: String(order.orderId),
+                    status: String(status),
+                },
+            })
+        );
+    }
+
+    const vendorIds = [
+        ...new Set(
+            (order.vendorItems || [])
+                .map((item) => String(item?.vendorId || '').trim())
+                .filter(Boolean)
+        ),
+    ];
+
+    vendorIds.forEach((vendorId) => {
+        notificationTasks.push(
+            createNotification({
+                recipientId: vendorId,
+                recipientType: 'vendor',
+                title: 'Order status updated by admin',
+                message: `Order ${order.orderId} was updated to ${status} by admin.`,
+                type: 'order',
+                data: {
+                    orderId: String(order.orderId),
+                    status: String(status),
+                },
+            })
+        );
+    });
+
+    if (order.deliveryBoyId) {
+        notificationTasks.push(
+            createNotification({
+                recipientId: order.deliveryBoyId,
+                recipientType: 'delivery',
+                title: 'Assigned order updated',
+                message: `Order ${order.orderId} is now ${status}.`,
+                type: 'order',
+                data: {
+                    orderId: String(order.orderId),
+                    status: String(status),
+                },
+            })
+        );
+    }
+
+    if (notificationTasks.length > 0) {
+        await Promise.allSettled(notificationTasks);
+    }
+
     res.status(200).json(new ApiResponse(200, order, 'Order status updated.'));
 });
 
@@ -134,6 +216,12 @@ export const assignDeliveryBoy = asyncHandler(async (req, res) => {
     order.deliveryBoyId = deliveryBoyId;
     if (order.status === 'pending') {
         order.status = 'processing';
+        // Keep vendor-facing status in sync with order lifecycle.
+        order.vendorItems = (order.vendorItems || []).map((vi) => {
+            const current = String(vi?.status || 'pending');
+            if (current === 'cancelled' || current === 'delivered') return vi;
+            return { ...vi.toObject(), status: 'processing' };
+        });
     }
     await order.save();
 
@@ -149,6 +237,50 @@ export const assignDeliveryBoy = asyncHandler(async (req, res) => {
             assignedAt: new Date().toISOString(),
         },
     });
+
+    const assignmentTasks = [];
+    if (order.userId) {
+        assignmentTasks.push(
+            createNotification({
+                recipientId: order.userId,
+                recipientType: 'user',
+                title: isReassigned ? 'Delivery partner updated' : 'Delivery assigned',
+                message: `Order ${order.orderId} has a delivery partner assigned.`,
+                type: 'order',
+                data: {
+                    orderId: String(order.orderId),
+                    deliveryBoyId: String(deliveryBoy._id),
+                },
+            })
+        );
+    }
+
+    const vendorIds = [
+        ...new Set(
+            (order.vendorItems || [])
+                .map((item) => String(item?.vendorId || '').trim())
+                .filter(Boolean)
+        ),
+    ];
+    vendorIds.forEach((vendorId) => {
+        assignmentTasks.push(
+            createNotification({
+                recipientId: vendorId,
+                recipientType: 'vendor',
+                title: isReassigned ? 'Delivery reassigned' : 'Delivery assigned',
+                message: `Order ${order.orderId} has been assigned to a delivery partner.`,
+                type: 'order',
+                data: {
+                    orderId: String(order.orderId),
+                    deliveryBoyId: String(deliveryBoy._id),
+                },
+            })
+        );
+    });
+
+    if (assignmentTasks.length > 0) {
+        await Promise.allSettled(assignmentTasks);
+    }
 
     res.status(200).json(new ApiResponse(200, order, 'Delivery boy assigned.'));
 });

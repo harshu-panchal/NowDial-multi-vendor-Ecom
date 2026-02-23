@@ -229,7 +229,7 @@ export const products = [
     originalPrice: 99.99,
     image: sweaterImg,
     flashSale: false,
-    isNew: true,
+    isNewArrival: true,
     stock: "in_stock",
     stockQuantity: 78,
     rating: 4.6,
@@ -244,7 +244,7 @@ export const products = [
     price: 119.99,
     image: leatherBootsImg,
     flashSale: false,
-    isNew: true,
+    isNewArrival: true,
     stock: "in_stock",
     stockQuantity: 95,
     rating: 4.4,
@@ -260,7 +260,7 @@ export const products = [
     originalPrice: 349.99,
     image: stylishWatchImg,
     flashSale: false,
-    isNew: true,
+    isNewArrival: true,
     stock: "in_stock",
     stockQuantity: 150,
     rating: 4.7,
@@ -290,7 +290,7 @@ export const products = [
     originalPrice: 59.99,
     image: shirtImg,
     flashSale: true,
-    isNew: true,
+    isNewArrival: true,
     stock: "in_stock",
     stockQuantity: 60,
     rating: 4.5,
@@ -306,7 +306,7 @@ export const products = [
     originalPrice: 79.99,
     image: maxiImg,
     flashSale: true,
-    isNew: true,
+    isNewArrival: true,
     stock: "in_stock",
     stockQuantity: 88,
     rating: 4.6,
@@ -322,7 +322,7 @@ export const products = [
     originalPrice: 49.99,
     image: necklessImg,
     flashSale: true,
-    isNew: true,
+    isNewArrival: true,
     stock: "in_stock",
     stockQuantity: 35,
     rating: 4.8,
@@ -338,7 +338,7 @@ export const products = [
     originalPrice: 129.99,
     image: athlaticShoesImg,
     flashSale: true,
-    isNew: true,
+    isNewArrival: true,
     stock: "low_stock",
     stockQuantity: 12,
     rating: 4.4,
@@ -354,7 +354,7 @@ export const products = [
     originalPrice: 49.99,
     image: beltImg,
     flashSale: true,
-    isNew: true,
+    isNewArrival: true,
     stock: "in_stock",
     stockQuantity: 52,
     rating: 4.5,
@@ -426,10 +426,10 @@ export const getSimilarProducts = (currentProductId, limit = 6) => {
 
 // Get new arrivals (products marked as new)
 export const getNewArrivals = (limit = 8) => {
-  return products.filter((p) => p.isNew).slice(0, limit);
+  return products.filter((p) => p.isNewArrival).slice(0, limit);
 };
 
-export const getAllNewArrivals = () => products.filter((p) => p.isNew);
+export const getAllNewArrivals = () => products.filter((p) => p.isNewArrival);
 
 // Get recommended products based on user behavior
 export const getRecommendedProducts = (limit = 6) => {

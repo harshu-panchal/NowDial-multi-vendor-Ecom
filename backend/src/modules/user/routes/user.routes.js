@@ -4,6 +4,7 @@ import * as addressController from '../controllers/address.controller.js';
 import * as wishlistController from '../controllers/wishlist.controller.js';
 import * as reviewController from '../controllers/review.controller.js';
 import * as orderController from '../controllers/order.controller.js';
+import * as notificationController from '../controllers/notification.controller.js';
 import { authenticate, optionalAuth } from '../../../middlewares/authenticate.js';
 import { authorize, enforceAccountStatus } from '../../../middlewares/authorize.js';
 import { authLimiter, otpLimiter } from '../../../middlewares/rateLimiter.js';
@@ -26,7 +27,7 @@ import {
     createAddressSchema,
     updateAddressSchema,
 } from '../validators/address.validator.js';
-import { placeOrderSchema } from '../validators/order.validator.js';
+import { placeOrderSchema, createReturnRequestSchema } from '../validators/order.validator.js';
 
 const router = Router();
 const customerAuth = [authenticate, authorize('customer'), enforceAccountStatus];
@@ -68,5 +69,14 @@ router.post('/orders', optionalAuth, validate(placeOrderSchema), orderController
 router.get('/orders', ...customerAuth, orderController.getUserOrders);
 router.get('/orders/:id', ...customerAuth, orderController.getOrderDetail);
 router.patch('/orders/:id/cancel', ...customerAuth, orderController.cancelOrder);
+router.post('/orders/:id/returns', ...customerAuth, validate(createReturnRequestSchema), orderController.createReturnRequest);
+router.get('/returns', ...customerAuth, orderController.getUserReturnRequests);
+router.get('/returns/:id', ...customerAuth, orderController.getUserReturnRequestById);
+
+// Notification routes (protected)
+router.get('/notifications', ...customerAuth, notificationController.getUserNotifications);
+router.put('/notifications/:id/read', ...customerAuth, notificationController.markUserNotificationAsRead);
+router.put('/notifications/read-all', ...customerAuth, notificationController.markAllUserNotificationsAsRead);
+router.delete('/notifications/:id', ...customerAuth, notificationController.deleteUserNotification);
 
 export default router;

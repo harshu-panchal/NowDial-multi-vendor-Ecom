@@ -15,7 +15,7 @@ import LazyImage from '../../../shared/components/LazyImage';
 const MobileOrderDetail = () => {
   const { orderId } = useParams();
   const navigate = useNavigate();
-  const { getOrder, cancelOrder, fetchOrderById } = useOrderStore();
+  const { getOrder, cancelOrder, fetchOrderById, requestReturn } = useOrderStore();
   const { addItem } = useCartStore();
   const [isResolving, setIsResolving] = useState(true);
   const order = getOrder(orderId);
@@ -109,6 +109,39 @@ const MobileOrderDetail = () => {
       } else {
         toast.error('This order cannot be cancelled');
       }
+    }
+  };
+
+  const handleRequestReturn = async () => {
+    if (order.status !== 'delivered') {
+      toast.error('Return can only be requested for delivered orders');
+      return;
+    }
+
+    const reason = window.prompt('Enter return reason (minimum 5 characters):', 'Product issue');
+    if (!reason) return;
+    if (reason.trim().length < 5) {
+      toast.error('Please enter a valid return reason');
+      return;
+    }
+
+    const vendorIds = Array.isArray(order.vendorItems)
+      ? [...new Set(order.vendorItems.map((group) => String(group?.vendorId || '')).filter(Boolean))]
+      : [];
+
+    if (vendorIds.length > 1) {
+      toast.error('Please contact support to request return for multi-vendor orders');
+      return;
+    }
+
+    try {
+      await requestReturn(order.id, {
+        reason: reason.trim(),
+        ...(vendorIds.length === 1 ? { vendorId: vendorIds[0] } : {}),
+      });
+      toast.success('Return request submitted successfully');
+    } catch (error) {
+      toast.error(error?.response?.data?.message || error?.message || 'Failed to submit return request');
     }
   };
 
@@ -296,6 +329,15 @@ const MobileOrderDetail = () => {
                   <FiRotateCw className="text-lg" />
                   Reorder
                 </button>
+                {order.status === 'delivered' && (
+                  <button
+                    onClick={handleRequestReturn}
+                    className="w-full py-3 bg-amber-50 text-amber-700 rounded-xl font-semibold flex items-center justify-center gap-2 hover:bg-amber-100 transition-colors"
+                  >
+                    <FiPackage className="text-lg" />
+                    Request Return
+                  </button>
+                )}
                 <button
                   onClick={() => navigate(`/track-order/${order.id}`)}
                   className="w-full py-3 bg-gray-100 text-gray-700 rounded-xl font-semibold flex items-center justify-center gap-2 hover:bg-gray-200 transition-colors"

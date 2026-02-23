@@ -117,6 +117,7 @@ import MobileVerification from "./modules/UserApp/pages/Verification";
 import MobileForgotPassword from "./modules/UserApp/pages/ForgotPassword";
 import MobileResetPassword from "./modules/UserApp/pages/ResetPassword";
 import MobileProfile from "./modules/UserApp/pages/Profile";
+import UserNotifications from "./modules/UserApp/pages/Notifications";
 import MobileOrders from "./modules/UserApp/pages/Orders";
 import MobileOrderDetail from "./modules/UserApp/pages/OrderDetail";
 import MobileAddresses from "./modules/UserApp/pages/Addresses";
@@ -140,6 +141,7 @@ import DeliveryDashboard from "./modules/Delivery/pages/Dashboard";
 import DeliveryOrders from "./modules/Delivery/pages/Orders";
 import DeliveryOrderDetail from "./modules/Delivery/pages/OrderDetail";
 import DeliveryProfile from "./modules/Delivery/pages/Profile";
+import DeliveryNotifications from "./modules/Delivery/pages/Notifications";
 // Vendor Routes
 import VendorLogin from "./modules/Vendor/pages/Login";
 import VendorRegister from "./modules/Vendor/pages/Register";
@@ -251,7 +253,9 @@ const AppRoutes = () => {
         path="/checkout"
         element={
           <RouteWrapper>
-            <MobileCheckout />
+            <ProtectedRoute>
+              <MobileCheckout />
+            </ProtectedRoute>
           </RouteWrapper>
         }
       />
@@ -378,6 +382,16 @@ const AppRoutes = () => {
           <RouteWrapper>
             <ProtectedRoute>
               <MobileProfile />
+            </ProtectedRoute>
+          </RouteWrapper>
+        }
+      />
+      <Route
+        path="/notifications"
+        element={
+          <RouteWrapper>
+            <ProtectedRoute>
+              <UserNotifications />
             </ProtectedRoute>
           </RouteWrapper>
         }
@@ -526,6 +540,7 @@ const AppRoutes = () => {
         <Route path="dashboard" element={<DeliveryDashboard />} />
         <Route path="orders" element={<DeliveryOrders />} />
         <Route path="orders/:id" element={<DeliveryOrderDetail />} />
+        <Route path="notifications" element={<DeliveryNotifications />} />
         <Route path="profile" element={<DeliveryProfile />} />
       </Route>
       {/* Vendor Routes */}

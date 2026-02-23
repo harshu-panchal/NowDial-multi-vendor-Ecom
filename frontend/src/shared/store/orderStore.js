@@ -253,6 +253,25 @@ export const useOrderStore = create(
         return true;
       },
 
+      requestReturn: async (orderId, payload = {}) => {
+        const body = {
+          reason: String(payload?.reason || '').trim(),
+          ...(payload?.vendorId ? { vendorId: payload.vendorId } : {}),
+          ...(Array.isArray(payload?.items) ? { items: payload.items } : {}),
+          ...(Array.isArray(payload?.images) ? { images: payload.images } : {}),
+        };
+
+        const response = await api.post(`/user/orders/${orderId}/returns`, body);
+        const data = response?.data ?? response;
+        return data;
+      },
+
+      fetchUserReturns: async (page = 1, limit = 20, status = 'all') => {
+        const response = await api.get('/user/returns', { params: { page, limit, status } });
+        const payload = response?.data ?? response;
+        return payload?.returnRequests || [];
+      },
+
       resetOrders: () => {
         set({ orders: [], hasFetched: false });
       },

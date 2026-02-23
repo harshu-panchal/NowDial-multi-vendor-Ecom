@@ -84,7 +84,7 @@ const normalizeProduct = (raw) => {
     reviewCount: toNumber(raw?.reviewCount, 0),
     isActive: raw?.isActive !== false,
     flashSale: !!raw?.flashSale,
-    isNew: !!raw?.isNew,
+    isNew: !!raw?.isNewArrival,
   };
 };
 
@@ -139,6 +139,15 @@ const extractResponseData = (response) => {
 };
 
 const asList = (value) => (Array.isArray(value) ? value : []);
+const resolveBannerLink = (banner, fallback = "/offers") => {
+  const candidate = String(
+    banner?.linkUrl || banner?.link || banner?.url || ""
+  ).trim();
+  return candidate || fallback;
+};
+
+const isExternalLink = (target) => /^https?:\/\//i.test(String(target || "").trim());
+const isSafeInternalPath = (target) => String(target || "").startsWith("/");
 
 const MobileHome = () => {
   const navigate = useNavigate();
@@ -245,7 +254,7 @@ const MobileHome = () => {
           .map((banner, index) => ({
             id: normalizeId(banner._id || banner.id || `home-slide-${index}`),
             image: banner.image,
-            link: banner.link || "/offers",
+            link: resolveBannerLink(banner, "/offers"),
             title: banner.title || "",
           }));
 
@@ -265,7 +274,7 @@ const MobileHome = () => {
             subtitle: banner.subtitle || "Limited Time",
             description: banner.description || "",
             discount: banner.description || "Shop Now",
-            link: banner.link || "/offers",
+            link: resolveBannerLink(banner, "/offers"),
             image: banner.image,
             type: banner.type || "promotional",
           }));
@@ -284,7 +293,7 @@ const MobileHome = () => {
             image: banner.image,
             title: banner.title || "PREMIUM",
             subtitle: banner.subtitle || "Exclusive Collection",
-            link: banner.link || "/offers",
+            link: resolveBannerLink(banner, "/offers"),
           }));
         setSideBanner(mapped[0] || null);
       } else {
@@ -382,11 +391,25 @@ const MobileHome = () => {
     const target = String(slide?.link || "").trim();
     if (!target) return;
 
-    if (/^https?:\/\//i.test(target)) {
-      window.location.href = target;
+    if (isExternalLink(target)) {
+      window.open(target, "_blank", "noopener,noreferrer");
       return;
     }
-    navigate(target);
+    if (isSafeInternalPath(target)) {
+      navigate(target);
+    }
+  };
+
+  const handleBannerNavigation = (target) => {
+    const normalizedTarget = String(target || "").trim();
+    if (!normalizedTarget) return;
+    if (isExternalLink(normalizedTarget)) {
+      window.open(normalizedTarget, "_blank", "noopener,noreferrer");
+      return;
+    }
+    if (isSafeInternalPath(normalizedTarget)) {
+      navigate(normalizedTarget);
+    }
   };
 
   // Pull to refresh handler
@@ -509,12 +532,13 @@ const MobileHome = () => {
                   <p className="text-gray-300 text-sm mb-6 font-medium">
                     {sideBanner?.subtitle || "Exclusive Collection"}
                   </p>
-                  <Link
-                    to={sideBanner?.link || "/offers"}
+                  <button
+                    type="button"
+                    onClick={() => handleBannerNavigation(sideBanner?.link || "/offers")}
                     className="bg-white text-gray-900 font-bold py-3.5 px-10 rounded-xl w-full hover:bg-gray-100 transition-all transform hover:-translate-y-1 shadow-lg hover:shadow-xl uppercase tracking-widest text-sm"
                   >
                     Shop Now
-                  </Link>
+                  </button>
                 </div>
               </div>
             </div>

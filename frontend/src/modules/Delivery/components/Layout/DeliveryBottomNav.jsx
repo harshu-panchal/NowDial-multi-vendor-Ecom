@@ -1,16 +1,17 @@
 import { createPortal } from "react-dom";
 import { Link, useLocation } from "react-router-dom";
 import { motion } from "framer-motion";
-import { FiHome, FiPackage, FiUser } from "react-icons/fi";
-import { useDeliveryAuthStore } from "../../store/deliveryStore";
+import { FiHome, FiPackage, FiUser, FiBell } from "react-icons/fi";
+import { useDeliveryNotificationStore } from "../../store/deliveryNotificationStore";
 
 const DeliveryBottomNav = () => {
   const location = useLocation();
-  const { deliveryBoy } = useDeliveryAuthStore();
+  const { unreadCount } = useDeliveryNotificationStore();
 
   const navItems = [
     { path: "/delivery/dashboard", icon: FiHome, label: "Dashboard" },
     { path: "/delivery/orders", icon: FiPackage, label: "Orders" },
+    { path: "/delivery/notifications", icon: FiBell, label: "Alerts" },
     { path: "/delivery/profile", icon: FiUser, label: "Profile" },
   ];
 
@@ -62,6 +63,11 @@ const DeliveryBottomNav = () => {
                     strokeWidth: 2,
                   }}
                 />
+                {item.path === "/delivery/notifications" && unreadCount > 0 && (
+                  <span className="absolute -top-1 -right-2 min-w-[16px] px-1 rounded-full bg-red-500 text-white text-[10px] font-semibold text-center leading-4">
+                    {unreadCount > 99 ? "99+" : unreadCount}
+                  </span>
+                )}
               </motion.div>
               <span
                 className={`text-xs font-medium ${

@@ -5,7 +5,11 @@ import User from '../../../models/User.model.js';
 import { generateTokens } from '../../../utils/generateToken.js';
 import { sendOTP } from '../../../services/otp.service.js';
 import { sendEmail } from '../../../services/email.service.js';
-import { uploadLocalFileToCloudinaryAndCleanup } from '../../../services/upload.service.js';
+import {
+    uploadLocalFileToCloudinaryAndCleanup,
+    deleteFromCloudinary,
+    cleanupLocalFiles,
+} from '../../../services/upload.service.js';
 import {
     clearRefreshSession,
     decodeRefreshTokenOrThrow,
@@ -263,23 +267,34 @@ export const uploadProfileAvatar = asyncHandler(async (req, res) => {
         throw new ApiError(400, 'Avatar image file is required.');
     }
 
-    const uploaded = await uploadLocalFileToCloudinaryAndCleanup(
-        req.file.path,
-        'users/avatars'
-    );
+    let uploaded = null;
+    try {
+        uploaded = await uploadLocalFileToCloudinaryAndCleanup(
+            req.file.path,
+            'users/avatars'
+        );
 
-    const user = await User.findByIdAndUpdate(
-        req.user.id,
-        { avatar: uploaded.url },
-        { new: true, runValidators: true }
-    );
-    if (!user) throw new ApiError(404, 'User not found.');
+        const user = await User.findByIdAndUpdate(
+            req.user.id,
+            { avatar: uploaded.url },
+            { new: true, runValidators: true }
+        );
+        if (!user) throw new ApiError(404, 'User not found.');
 
-    return res.status(200).json(
-        new ApiResponse(
-            200,
-            { user, avatar: uploaded.url, publicId: uploaded.publicId },
-            'Profile picture updated successfully.'
-        )
-    );
+        return res.status(200).json(
+            new ApiResponse(
+                200,
+                { user, avatar: uploaded.url, publicId: uploaded.publicId },
+                'Profile picture updated successfully.'
+            )
+        );
+    } catch (error) {
+        if (!uploaded) {
+            await cleanupLocalFiles([req.file?.path]);
+        }
+        if (uploaded?.publicId) {
+            await deleteFromCloudinary(uploaded.publicId).catch(() => null);
+        }
+        throw error;
+    }
 });

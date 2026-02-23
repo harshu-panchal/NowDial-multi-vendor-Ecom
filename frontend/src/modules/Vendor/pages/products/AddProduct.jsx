@@ -44,7 +44,7 @@ const AddProduct = () => {
     guaranteePeriod: "",
     hsnCode: "",
     flashSale: false,
-    isNew: false,
+    isNewArrival: false,
     isFeatured: false,
     isVisible: true,
     codAllowed: true,
@@ -740,8 +740,8 @@ const AddProduct = () => {
             <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="checkbox"
-                name="isNew"
-                checked={formData.isNew}
+                name="isNewArrival"
+                checked={formData.isNewArrival}
                 onChange={handleChange}
                 className="w-4 h-4 text-primary-600 rounded focus:ring-primary-500"
               />

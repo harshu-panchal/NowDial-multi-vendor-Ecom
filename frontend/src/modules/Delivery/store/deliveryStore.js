@@ -75,6 +75,12 @@ export const useDeliveryAuthStore = create(
       isAuthenticated: false,
       isLoading: false,
       orders: [],
+      ordersPagination: {
+        total: 0,
+        page: 1,
+        limit: 20,
+        pages: 1,
+      },
       selectedOrder: null,
       isLoadingOrders: false,
       isLoadingOrder: false,
@@ -205,6 +211,12 @@ export const useDeliveryAuthStore = create(
           refreshToken: null,
           isAuthenticated: false,
           orders: [],
+          ordersPagination: {
+            total: 0,
+            page: 1,
+            limit: 20,
+            pages: 1,
+          },
           selectedOrder: null,
         });
         localStorage.removeItem('delivery-token');
@@ -265,13 +277,41 @@ export const useDeliveryAuthStore = create(
         }
       },
 
-      fetchOrders: async () => {
+      fetchOrders: async (options = {}) => {
         set({ isLoadingOrders: true });
         try {
-          const response = await api.get('/delivery/orders');
+          const { status, page, limit } = options || {};
+          const params = {};
+          if (status) params.status = status;
+          if (page !== undefined) params.page = page;
+          if (limit !== undefined) params.limit = limit;
+
+          const response = await api.get('/delivery/orders', { params });
           const payload = response?.data ?? response;
-          const list = Array.isArray(payload) ? payload.map(normalizeOrder) : [];
-          set({ orders: list, isLoadingOrders: false });
+
+          const hasPaginatedPayload =
+            payload &&
+            !Array.isArray(payload) &&
+            Array.isArray(payload.orders);
+
+          const rawOrders = hasPaginatedPayload ? payload.orders : (Array.isArray(payload) ? payload : []);
+          const list = rawOrders.map(normalizeOrder);
+
+          const pagination = hasPaginatedPayload
+            ? {
+                total: Number(payload?.pagination?.total || 0),
+                page: Number(payload?.pagination?.page || 1),
+                limit: Number(payload?.pagination?.limit || 20),
+                pages: Number(payload?.pagination?.pages || 1),
+              }
+            : {
+                total: list.length,
+                page: 1,
+                limit: list.length || 20,
+                pages: 1,
+              };
+
+          set({ orders: list, ordersPagination: pagination, isLoadingOrders: false });
           return list;
         } catch (error) {
           set({ isLoadingOrders: false });
@@ -293,12 +333,17 @@ export const useDeliveryAuthStore = create(
         }
       },
 
-      updateOrderStatus: async (id, backendStatus) => {
+      updateOrderStatus: async (id, backendStatus, options = {}) => {
         set({ isUpdatingOrderStatus: true });
         try {
-          const response = await api.patch(`/delivery/orders/${id}/status`, { status: backendStatus });
-          const payload = response?.data ?? response;
-          const normalized = normalizeOrder(payload);
+          const requestPayload = { status: backendStatus };
+          if (options?.otp) {
+            requestPayload.otp = String(options.otp).trim();
+          }
+
+          const response = await api.patch(`/delivery/orders/${id}/status`, requestPayload);
+          const responsePayload = response?.data ?? response;
+          const normalized = normalizeOrder(responsePayload);
           set((state) => ({
             orders: state.orders.map((order) => (String(order.id) === String(id) ? normalized : order)),
             selectedOrder:
@@ -327,7 +372,7 @@ export const useDeliveryAuthStore = create(
         return get().updateOrderStatus(id, 'shipped');
       },
 
-      completeOrder: async (id) => {
+      completeOrder: async (id, otp) => {
         const state = get();
         const current =
           state.orders.find((order) => String(order.id) === String(id)) ||
@@ -337,7 +382,12 @@ export const useDeliveryAuthStore = create(
         if (current && current.status !== 'in-transit') {
           return current;
         }
-        return get().updateOrderStatus(id, 'delivered');
+        return get().updateOrderStatus(id, 'delivered', { otp });
+      },
+
+      resendDeliveryOtp: async (id) => {
+        await api.post(`/delivery/orders/${id}/resend-delivery-otp`);
+        return true;
       },
 
       // Initialize delivery auth state from localStorage

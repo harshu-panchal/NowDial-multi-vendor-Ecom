@@ -27,20 +27,20 @@ const normalizeProduct = (raw) => {
     raw?.vendor && typeof raw.vendor === "object"
       ? raw.vendor
       : raw?.vendorId && typeof raw.vendorId === "object"
-      ? raw.vendorId
-      : null;
+        ? raw.vendorId
+        : null;
   const brandObj =
     raw?.brand && typeof raw.brand === "object"
       ? raw.brand
       : raw?.brandId && typeof raw.brandId === "object"
-      ? raw.brandId
-      : null;
+        ? raw.brandId
+        : null;
   const categoryObj =
     raw?.category && typeof raw.category === "object"
       ? raw.category
       : raw?.categoryId && typeof raw.categoryId === "object"
-      ? raw.categoryId
-      : null;
+        ? raw.categoryId
+        : null;
 
   const id = normalizeId(raw?.id || raw?._id);
   const vendorId = normalizeId(vendorObj?._id || vendorObj?.id || raw?.vendorId);
@@ -53,8 +53,8 @@ const normalizeProduct = (raw) => {
   const images = Array.isArray(raw?.images)
     ? raw.images
     : image
-    ? [image]
-    : [];
+      ? [image]
+      : [];
 
   return {
     ...raw,
@@ -75,7 +75,7 @@ const normalizeProduct = (raw) => {
     reviewCount: Number(raw?.reviewCount) || 0,
     isActive: raw?.isActive !== false,
     flashSale: !!raw?.flashSale,
-    isNew: !!raw?.isNew,
+    isNew: !!raw?.isNewArrival,
   };
 };
 

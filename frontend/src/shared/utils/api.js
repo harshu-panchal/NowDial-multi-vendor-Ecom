@@ -63,6 +63,22 @@ const api = axios.create({
   },
 });
 
+const AUTH_REDIRECT_LOCK_KEY = 'auth-redirect-lock';
+const AUTH_REDIRECT_LOCK_MS = 1500;
+
+const redirectTo = (path) => {
+  if (typeof window === 'undefined') return;
+  const now = Date.now();
+  const currentPath = window.location.pathname;
+  const lockUntil = Number(sessionStorage.getItem(AUTH_REDIRECT_LOCK_KEY) || 0);
+
+  if (currentPath === path) return;
+  if (now < lockUntil) return;
+
+  sessionStorage.setItem(AUTH_REDIRECT_LOCK_KEY, String(now + AUTH_REDIRECT_LOCK_MS));
+  window.location.href = path;
+};
+
 const getScopeFromUrl = (url = '') => {
   if (url.startsWith('/admin')) return 'admin';
   if (url.startsWith('/vendor')) return 'vendor';
@@ -194,11 +210,11 @@ api.interceptors.response.use(
           currentPath === '/forgot-password' ||
           currentPath === '/reset-password';
         if (!isAuthPage) {
-          window.location.href = routeConfig.loginPath;
+          redirectTo(routeConfig.loginPath);
         }
       } else if (currentPath.startsWith(routeConfig.areaPrefix) && currentPath !== routeConfig.loginPath) {
         toast.error('Session expired. Please login again.');
-        window.location.href = routeConfig.loginPath;
+        redirectTo(routeConfig.loginPath);
       }
     }
 

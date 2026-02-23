@@ -82,13 +82,14 @@ const ProductCard = ({ product, hideRating = false, isFlashSale = false }) => {
       setTimeout(() => setIsAdding(false), 600);
     }
 
-    addItem({
+    const addedToCart = addItem({
       id: product.id,
       name: product.name,
       price: product.price,
       image: product.image,
       quantity: 1,
     });
+    if (!addedToCart) return;
     triggerCartAnimation();
     toast.success("Added to cart!");
   };
@@ -132,13 +133,15 @@ const ProductCard = ({ product, hideRating = false, isFlashSale = false }) => {
       removeFromWishlist(product.id);
       toast.success("Removed from wishlist");
     } else {
-      addToWishlist({
+      const addedToWishlist = addToWishlist({
         id: product.id,
         name: product.name,
         price: product.price,
         image: product.image,
       });
-      toast.success("Added to wishlist");
+      if (addedToWishlist) {
+        toast.success("Added to wishlist");
+      }
     }
   };
 

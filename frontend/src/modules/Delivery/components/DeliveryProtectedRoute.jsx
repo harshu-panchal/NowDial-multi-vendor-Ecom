@@ -1,13 +1,33 @@
 import { Navigate, useLocation } from 'react-router-dom';
 import { useDeliveryAuthStore } from '../store/deliveryStore';
 
-const DeliveryProtectedRoute = ({ children }) => {
-  const { isAuthenticated } = useDeliveryAuthStore();
-  const location = useLocation();
-  const hasDeliveryToken = Boolean(localStorage.getItem('delivery-token'));
+const decodeJwtPayload = (token) => {
+  try {
+    const parts = String(token || '').split('.');
+    if (parts.length < 2) return null;
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const json = window.atob(base64);
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+};
 
-  if (!isAuthenticated || !hasDeliveryToken) {
-    // Redirect to delivery login page with return URL
+const DeliveryProtectedRoute = ({ children }) => {
+  const { isAuthenticated, token } = useDeliveryAuthStore();
+  const location = useLocation();
+  const accessToken = token || localStorage.getItem('delivery-token');
+  const payload = decodeJwtPayload(accessToken);
+  const role = String(payload?.role || '').toLowerCase();
+
+  if (!isAuthenticated || !accessToken) {
+    return <Navigate to="/delivery/login" state={{ from: location }} replace />;
+  }
+
+  if (role && role !== 'delivery') {
+    localStorage.removeItem('delivery-token');
+    localStorage.removeItem('delivery-refresh-token');
+    localStorage.removeItem('delivery-auth-storage');
     return <Navigate to="/delivery/login" state={{ from: location }} replace />;
   }
 
@@ -15,4 +35,3 @@ const DeliveryProtectedRoute = ({ children }) => {
 };
 
 export default DeliveryProtectedRoute;
-

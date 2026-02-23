@@ -20,9 +20,11 @@ import { useDeliveryAuthStore } from '../store/deliveryStore';
 const DeliveryOrderDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { fetchOrderById, acceptOrder, completeOrder, isLoadingOrder, isUpdatingOrderStatus } = useDeliveryAuthStore();
+  const { fetchOrderById, acceptOrder, completeOrder, resendDeliveryOtp, isLoadingOrder, isUpdatingOrderStatus } = useDeliveryAuthStore();
   const [order, setOrder] = useState(null);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [deliveryOtp, setDeliveryOtp] = useState('');
+  const [isResendingOtp, setIsResendingOtp] = useState(false);
 
   const loadOrder = async () => {
     try {
@@ -65,12 +67,32 @@ const DeliveryOrderDetail = () => {
 
   const handleCompleteOrder = async () => {
     if (!order || order.status !== 'in-transit') return;
+    const normalizedOtp = String(deliveryOtp || '').trim();
+    if (!/^\d{6}$/.test(normalizedOtp)) {
+      toast.error('Please enter valid 6-digit OTP');
+      return;
+    }
+
     try {
-      const updated = await completeOrder(order.id);
+      const updated = await completeOrder(order.id, normalizedOtp);
       setOrder(updated);
+      setDeliveryOtp('');
       toast.success('Order marked as delivered');
     } catch {
       // Error toast handled by API interceptor.
+    }
+  };
+
+  const handleResendOtp = async () => {
+    if (!order || order.status !== 'in-transit' || isResendingOtp) return;
+    try {
+      setIsResendingOtp(true);
+      await resendDeliveryOtp(order.id);
+      toast.success('Delivery OTP resent to customer');
+    } catch {
+      // Error toast handled by API interceptor.
+    } finally {
+      setIsResendingOtp(false);
     }
   };
 
@@ -326,14 +348,34 @@ const DeliveryOrderDetail = () => {
             </button>
           )}
           {order.status === 'in-transit' && (
-            <button
-              onClick={handleCompleteOrder}
-              disabled={isUpdatingOrderStatus}
-              className="w-full gradient-green text-white py-4 rounded-xl font-semibold text-base flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              <FiCheckCircle />
-              {isUpdatingOrderStatus ? 'Please wait...' : 'Mark as Delivered'}
-            </button>
+            <div className="space-y-3">
+              <input
+                type="text"
+                inputMode="numeric"
+                maxLength={6}
+                value={deliveryOtp}
+                onChange={(e) => setDeliveryOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                placeholder="Enter 6-digit delivery OTP"
+                className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-primary-500 focus:outline-none text-base"
+              />
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={handleResendOtp}
+                  disabled={isResendingOtp || isUpdatingOrderStatus}
+                  className="w-full bg-gray-100 text-gray-700 py-3 rounded-xl font-semibold text-sm hover:bg-gray-200 disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {isResendingOtp ? 'Resending...' : 'Resend OTP'}
+                </button>
+                <button
+                  onClick={handleCompleteOrder}
+                  disabled={isUpdatingOrderStatus}
+                  className="w-full gradient-green text-white py-3 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  <FiCheckCircle />
+                  {isUpdatingOrderStatus ? 'Please wait...' : 'Mark as Delivered'}
+                </button>
+              </div>
+            </div>
           )}
           <button
             onClick={() => order.phone && window.open(`tel:${order.phone}`, '_self')}

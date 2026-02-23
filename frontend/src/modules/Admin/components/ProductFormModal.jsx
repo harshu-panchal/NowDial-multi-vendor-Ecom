@@ -46,7 +46,7 @@ const ProductFormModal = ({ isOpen, onClose, productId, onSuccess }) => {
     guaranteePeriod: "",
     hsnCode: "",
     flashSale: false,
-    isNew: false,
+    isNewArrival: false,
     isFeatured: false,
     isVisible: true,
     codAllowed: true,
@@ -134,7 +134,7 @@ const ProductFormModal = ({ isOpen, onClose, productId, onSuccess }) => {
             guaranteePeriod: product.guaranteePeriod || "",
             hsnCode: product.hsnCode || "",
             flashSale: product.flashSale || false,
-            isNew: product.isNew || false,
+            isNewArrival: product.isNewArrival || false,
             isFeatured: product.isFeatured || false,
             isVisible: product.isVisible !== undefined ? product.isVisible : true,
             codAllowed:
@@ -189,7 +189,7 @@ const ProductFormModal = ({ isOpen, onClose, productId, onSuccess }) => {
         guaranteePeriod: "",
         hsnCode: "",
         flashSale: false,
-        isNew: false,
+        isNewArrival: false,
         isFeatured: false,
         isVisible: true,
         codAllowed: true,
@@ -655,8 +655,8 @@ const ProductFormModal = ({ isOpen, onClose, productId, onSuccess }) => {
                                 {isUploadingMainImage
                                   ? "Uploading Main Image..."
                                   : formData.image
-                                  ? "Change Main Image"
-                                  : "Choose Main Image"}
+                                    ? "Change Main Image"
+                                    : "Choose Main Image"}
                               </span>
                             </label>
                           </div>
@@ -1041,8 +1041,8 @@ const ProductFormModal = ({ isOpen, onClose, productId, onSuccess }) => {
                       <label className="flex items-center gap-2">
                         <input
                           type="checkbox"
-                          name="isNew"
-                          checked={formData.isNew}
+                          name="isNewArrival"
+                          checked={formData.isNewArrival}
                           onChange={handleChange}
                           className="w-4 h-4 text-primary-600 rounded focus:ring-primary-500"
                         />

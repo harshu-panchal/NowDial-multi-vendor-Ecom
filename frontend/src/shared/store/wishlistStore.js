@@ -2,9 +2,24 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import api from '../utils/api';
 import { useAuthStore } from './authStore';
+import { setPostLoginAction, setPostLoginRedirect } from '../utils/postLoginAction';
 
 const isMongoId = (value) => /^[a-fA-F0-9]{24}$/.test(String(value || ''));
 const normalizeId = (value) => String(value ?? '').trim();
+
+const redirectToLogin = () => {
+  if (typeof window === 'undefined') return;
+  const currentPath = window.location.pathname || '/home';
+  if (currentPath === '/login') return;
+
+  const fromPath = `${window.location.pathname || ''}${window.location.search || ''}${window.location.hash || ''}`;
+  setPostLoginRedirect(fromPath || '/home');
+
+  // SPA-friendly redirect without full page reload.
+  const nextState = { from: { pathname: fromPath || '/home' } };
+  window.history.pushState(nextState, '', '/login');
+  window.dispatchEvent(new PopStateEvent('popstate', { state: nextState }));
+};
 
 const normalizeWishlistItem = (item) => {
   const product = item?.productId || item;
@@ -65,10 +80,21 @@ export const useWishlistStore = create(
 
       // Add item to wishlist
       addItem: (item) => {
+        const authState = useAuthStore.getState();
+        if (!authState?.isAuthenticated) {
+          setPostLoginAction({
+            type: 'wishlist:add',
+            payload: item,
+          });
+          redirectToLogin();
+          return false;
+        }
+
         const normalizedItem = normalizeWishlistItem(item);
         if (!normalizedItem.id) {
-          return;
+          return false;
         }
+        let added = false;
         set((state) => {
           const existingItem = state.items.find(
             (i) => normalizeId(i.id) === normalizeId(normalizedItem.id)
@@ -76,15 +102,17 @@ export const useWishlistStore = create(
           if (existingItem) {
             return state; // Item already in wishlist
           }
+          added = true;
           return {
             items: [...state.items, normalizedItem],
           };
         });
 
-        const authState = useAuthStore.getState();
         if (authState?.isAuthenticated && isMongoId(normalizedItem.id)) {
           api.post('/user/wishlist', { productId: String(normalizedItem.id) }).catch(() => null);
         }
+
+        return added;
       },
 
       // Remove item from wishlist

@@ -134,7 +134,7 @@ const MobileProductDetail = () => {
 
     const finalPrice = resolveVariantPrice(product, selectedVariant);
 
-    addItem({
+    const addedToCart = addItem({
       id: product.id,
       name: product.name,
       price: finalPrice,
@@ -142,6 +142,7 @@ const MobileProductDetail = () => {
       quantity: quantity,
       variant: selectedVariant,
     });
+    if (!addedToCart) return;
     triggerCartAnimation();
     toast.success("Added to cart!");
   };
@@ -156,13 +157,15 @@ const MobileProductDetail = () => {
       removeFromWishlist(product.id);
       toast.success("Removed from wishlist");
     } else {
-      addToWishlist({
+      const addedToWishlist = addToWishlist({
         id: product.id,
         name: product.name,
         price: product.price,
         image: product.image,
       });
-      toast.success("Added to wishlist");
+      if (addedToWishlist) {
+        toast.success("Added to wishlist");
+      }
     }
   };
 

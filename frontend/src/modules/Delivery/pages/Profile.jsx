@@ -9,9 +9,14 @@ import { formatPrice } from '../../../shared/utils/helpers';
 
 const DeliveryProfile = () => {
   const navigate = useNavigate();
-  const { deliveryBoy, updateProfile, fetchProfile, isLoading, logout } = useDeliveryAuthStore();
+  const { deliveryBoy, updateProfile, fetchProfile, fetchOrders, isLoading, logout } = useDeliveryAuthStore();
   const [isEditing, setIsEditing] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [profileMetrics, setProfileMetrics] = useState({
+    totalDeliveries: 0,
+    completedToday: 0,
+    earnings: 0,
+  });
   const [formData, setFormData] = useState({
     name: deliveryBoy?.name || '',
     email: deliveryBoy?.email || '',
@@ -24,14 +29,44 @@ const DeliveryProfile = () => {
     const loadProfile = async () => {
       try {
         setLoadFailed(false);
-        await fetchProfile();
+        const profile = await fetchProfile();
+
+        try {
+          const orders = await fetchOrders();
+          const today = new Date();
+          const isToday = (dateString) => {
+            const date = new Date(dateString);
+            return (
+              date.getDate() === today.getDate() &&
+              date.getMonth() === today.getMonth() &&
+              date.getFullYear() === today.getFullYear()
+            );
+          };
+
+          const deliveredOrders = orders.filter((order) => order.status === 'completed');
+          const completedToday = deliveredOrders.filter((order) => isToday(order.updatedAt || order.createdAt)).length;
+          const earnings = deliveredOrders.reduce((sum, order) => sum + Number(order.deliveryFee || 0), 0);
+
+          setProfileMetrics({
+            totalDeliveries: deliveredOrders.length,
+            completedToday,
+            earnings,
+          });
+        } catch {
+          // If orders fail to load, keep profile page functional with safe fallback metrics.
+          setProfileMetrics({
+            totalDeliveries: Number(profile?.totalDeliveries || 0),
+            completedToday: 0,
+            earnings: Number(profile?.cashCollected || 0),
+          });
+        }
       } catch {
         setLoadFailed(true);
       }
     };
 
     loadProfile();
-  }, [fetchProfile]);
+  }, [fetchProfile, fetchOrders]);
 
   useEffect(() => {
     setFormData({
@@ -96,10 +131,10 @@ const DeliveryProfile = () => {
   };
 
   const stats = [
-    { label: 'Total Deliveries', value: Number(deliveryBoy?.totalDeliveries || 0) },
-    { label: 'Completed Today', value: '0' },
+    { label: 'Total Deliveries', value: Number(profileMetrics.totalDeliveries || 0) },
+    { label: 'Completed Today', value: Number(profileMetrics.completedToday || 0) },
     { label: 'Rating', value: Number(deliveryBoy?.rating || 0).toFixed(1) },
-    { label: 'Earnings', value: formatPrice(Number(deliveryBoy?.cashCollected || 0)) },
+    { label: 'Earnings', value: formatPrice(Number(profileMetrics.earnings || 0)) },
   ];
 
   return (

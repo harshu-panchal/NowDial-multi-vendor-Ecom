@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { FiArrowRight, FiZap, FiTag } from "react-icons/fi";
 
 // Hero images for the parallax effect
@@ -50,7 +50,18 @@ const gradientPalette = [
   "from-green-500 via-teal-500 to-cyan-500",
 ];
 
+const resolveBannerLink = (banner, fallback = "/offers") => {
+  const candidate = String(
+    banner?.linkUrl || banner?.link || banner?.url || ""
+  ).trim();
+  return candidate || fallback;
+};
+
+const isExternalLink = (target) => /^https?:\/\//i.test(String(target || "").trim());
+const isSafeInternalPath = (target) => String(target || "").startsWith("/");
+
 const AnimatedBanner = ({ banners = null }) => {
+  const navigate = useNavigate();
   const [currentBanner, setCurrentBanner] = useState(0);
 
   const resolvedBanners =
@@ -63,11 +74,23 @@ const AnimatedBanner = ({ banners = null }) => {
           description: banner.description || "",
           gradient:
             banner.gradient || gradientPalette[index % gradientPalette.length],
-          link: banner.link || "/offers",
+          link: resolveBannerLink(banner, "/offers"),
           icon: banner.icon || FiTag,
           heroImage: banner.image || banner.heroImage || watchImg,
         }))
       : defaultBanners;
+
+  const handleBannerClick = (target) => {
+    const normalizedTarget = String(target || "").trim();
+    if (!normalizedTarget) return;
+    if (isExternalLink(normalizedTarget)) {
+      window.open(normalizedTarget, "_blank", "noopener,noreferrer");
+      return;
+    }
+    if (isSafeInternalPath(normalizedTarget)) {
+      navigate(normalizedTarget);
+    }
+  };
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -170,8 +193,9 @@ const AnimatedBanner = ({ banners = null }) => {
                 </div>
 
                 {/* Content */}
-                <Link
-                  to={banner.link}
+                <button
+                  type="button"
+                  onClick={() => handleBannerClick(banner.link)}
                   className="relative z-10 h-full flex pt-2 justify-between group">
                   <div className="flex-1">
                     <motion.div
@@ -237,7 +261,7 @@ const AnimatedBanner = ({ banners = null }) => {
                       <FiArrowRight className="text-white text-sm relative z-10" />
                     </motion.div>
                   </div>
-                </Link>
+                </button>
               </motion.div>
             );
           })}

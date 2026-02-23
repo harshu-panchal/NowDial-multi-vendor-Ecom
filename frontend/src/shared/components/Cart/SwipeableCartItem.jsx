@@ -55,12 +55,13 @@ const SwipeableCartItem = ({ item, index }) => {
     };
 
     const handleSaveForLater = (item) => {
-        addToWishlist({
+        const addedToWishlist = addToWishlist({
             id: item.id,
             name: item.name,
             price: item.price,
             image: item.image,
         });
+        if (!addedToWishlist) return;
         removeItem(item.id, item.variant);
         toast.success("Saved for later!");
     };

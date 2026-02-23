@@ -4,6 +4,7 @@ import ApiError from '../../../utils/ApiError.js';
 import ReturnRequest from '../../../models/ReturnRequest.model.js';
 import Order from '../../../models/Order.model.js';
 import User from '../../../models/User.model.js';
+import Admin from '../../../models/Admin.model.js';
 import { createNotification } from '../../../services/notification.service.js';
 
 const normalizeReturnRequest = (requestDoc) => {
@@ -141,19 +142,60 @@ export const updateVendorReturnRequestStatus = asyncHandler(async (req, res) => 
     if (refundStatus) request.refundStatus = refundStatus;
     await request.save();
 
-    await createNotification({
-        recipientId: req.user.id,
-        recipientType: 'vendor',
-        title: 'Return request updated',
-        message: `Return request for order ${request.orderId?.orderId || request.orderId} updated.`,
-        type: 'order',
-        data: {
-            returnRequestId: String(request._id),
-            orderId: String(request.orderId?.orderId || request.orderId || ''),
-            status: String(request.status),
-            refundStatus: String(request.refundStatus || ''),
-        },
+    const notificationTasks = [
+        createNotification({
+            recipientId: req.user.id,
+            recipientType: 'vendor',
+            title: 'Return request updated',
+            message: `Return request for order ${request.orderId?.orderId || request.orderId} updated.`,
+            type: 'order',
+            data: {
+                returnRequestId: String(request._id),
+                orderId: String(request.orderId?.orderId || request.orderId || ''),
+                status: String(request.status),
+                refundStatus: String(request.refundStatus || ''),
+            },
+        }),
+    ];
+
+    if (request.userId?._id) {
+        notificationTasks.push(
+            createNotification({
+                recipientId: request.userId._id,
+                recipientType: 'user',
+                title: 'Return request status updated',
+                message: `Your return request for order ${request.orderId?.orderId || request.orderId} is now ${request.status}.`,
+                type: 'order',
+                data: {
+                    returnRequestId: String(request._id),
+                    orderId: String(request.orderId?.orderId || request.orderId || ''),
+                    status: String(request.status),
+                    refundStatus: String(request.refundStatus || ''),
+                },
+            })
+        );
+    }
+
+    const admins = await Admin.find({ isActive: true }).select('_id').lean();
+    admins.forEach((admin) => {
+        notificationTasks.push(
+            createNotification({
+                recipientId: admin._id,
+                recipientType: 'admin',
+                title: 'Return request updated',
+                message: `Return request for order ${request.orderId?.orderId || request.orderId} moved to ${request.status}.`,
+                type: 'order',
+                data: {
+                    returnRequestId: String(request._id),
+                    orderId: String(request.orderId?.orderId || request.orderId || ''),
+                    status: String(request.status),
+                    refundStatus: String(request.refundStatus || ''),
+                },
+            })
+        );
     });
+
+    await Promise.allSettled(notificationTasks);
 
     res.status(200).json(
         new ApiResponse(
