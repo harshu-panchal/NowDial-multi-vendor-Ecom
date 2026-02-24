@@ -47,6 +47,8 @@ const MobileCheckout = () => {
   const [appliedDiscount, setAppliedDiscount] = useState(0);
   const [isApplyingCoupon, setIsApplyingCoupon] = useState(false);
   const [shippingOption, setShippingOption] = useState("standard");
+  const [estimatedShipping, setEstimatedShipping] = useState(null);
+  const [isEstimatingShipping, setIsEstimatingShipping] = useState(false);
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -92,7 +94,7 @@ const MobileCheckout = () => {
     }
   }, [isAuthenticated, user, isGuest, getDefaultAddress, addresses]);
 
-  const calculateShipping = () => {
+  const calculateShippingFallback = () => {
     const total = getTotal();
     if (appliedCoupon?.type === "freeship") {
       return 0;
@@ -107,7 +109,10 @@ const MobileCheckout = () => {
   };
 
   const total = getTotal();
-  const shipping = calculateShipping();
+  const shipping =
+    typeof estimatedShipping === "number"
+      ? estimatedShipping
+      : calculateShippingFallback();
   const discount = appliedCoupon ? appliedDiscount : 0;
   const taxableAmount = Math.max(0, total - discount);
   const tax = taxableAmount * 0.18;
@@ -119,6 +124,55 @@ const MobileCheckout = () => {
       setAppliedDiscount(0);
     }
   }, [total, appliedCoupon]);
+
+  useEffect(() => {
+    let active = true;
+    const timer = setTimeout(async () => {
+      const validItems = items
+        .map((item) => ({
+          productId: item?.id,
+          quantity: Number(item?.quantity || 1),
+          variant: item?.variant || undefined,
+        }))
+        .filter((item) => item.productId);
+
+      if (!validItems.length) {
+        if (active) setEstimatedShipping(0);
+        return;
+      }
+
+      setIsEstimatingShipping(true);
+      try {
+        const response = await api.post("/shipping/estimate", {
+          items: validItems,
+          shippingAddress: {
+            country: String(formData.country || "").trim(),
+          },
+          shippingOption,
+          couponType: appliedCoupon?.type || null,
+        });
+
+        const payload = response?.data ?? response;
+        const nextShipping = Number(payload?.shipping);
+        if (active) {
+          setEstimatedShipping(Number.isFinite(nextShipping) ? nextShipping : null);
+        }
+      } catch {
+        if (active) {
+          setEstimatedShipping(null);
+        }
+      } finally {
+        if (active) {
+          setIsEstimatingShipping(false);
+        }
+      }
+    }, 250);
+
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [items, formData.country, shippingOption, appliedCoupon?.type]);
 
   const handleApplyCoupon = async () => {
     const normalizedCode = couponCode.trim().toUpperCase();
@@ -584,6 +638,11 @@ const MobileCheckout = () => {
                             </span>
                           </label>
                         </div>
+                        <p className="text-xs text-gray-500 mt-2">
+                          {isEstimatingShipping
+                            ? "Updating shipping estimate..."
+                            : `Estimated shipping: ${formatPrice(shipping)}`}
+                        </p>
                       </div>
                     )}
 

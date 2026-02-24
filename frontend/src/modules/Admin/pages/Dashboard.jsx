@@ -113,21 +113,40 @@ const Dashboard = () => {
           totalVendors: d.totalVendors || 0,
           pendingOrders: d.pendingOrders || 0,
         });
+      } else {
+        setStats({
+          totalRevenue: 0,
+          totalOrders: 0,
+          totalProducts: 0,
+          totalCustomers: 0,
+          totalVendors: 0,
+          pendingOrders: 0,
+        });
       }
       if (revenueRes.status === "fulfilled") {
         setRevenueData(normalizeRevenueData(revenueRes.value.data, apiPeriod));
+      } else {
+        setRevenueData([]);
       }
       if (orderStatusRes.status === "fulfilled") {
         setOrderStatusData(orderStatusRes.value.data || []);
+      } else {
+        setOrderStatusData([]);
       }
       if (topProductsRes.status === "fulfilled") {
         setTopProducts(topProductsRes.value.data || []);
+      } else {
+        setTopProducts([]);
       }
       if (customerGrowthRes.status === "fulfilled") {
         setCustomerGrowth(customerGrowthRes.value.data || []);
+      } else {
+        setCustomerGrowth([]);
       }
       if (recentOrdersRes.status === "fulfilled") {
         setRecentOrders(recentOrdersRes.value.data || []);
+      } else {
+        setRecentOrders([]);
       }
     } catch (error) {
       // Don't toast here as api.js interceptor handled global errors

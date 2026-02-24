@@ -355,10 +355,12 @@ const HomeSliders = () => {
                     type="text"
                     name="link"
                     defaultValue={editingSlider.link || ""}
-                    placeholder="Link URL"
-                    required
+                    placeholder="Optional: /offers or https://example.com"
                     className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                   />
+                  <p className="text-xs text-gray-500 -mt-2">
+                    Leave empty to make banner non-clickable. Invalid links are ignored.
+                  </p>
                   <div className="grid grid-cols-2 gap-4">
                     <input
                       type="number"

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { FiRefreshCw } from "react-icons/fi";
 import { motion, AnimatePresence } from "framer-motion";
 import DataTable from "../../components/DataTable";
+import Pagination from "../../components/Pagination";
 import Badge from "../../../../shared/components/Badge";
 import AnimatedSelect from "../../components/AnimatedSelect";
 import { assignDeliveryBoy, getAllDeliveryBoys, getAllOrders } from "../../services/adminService";
@@ -17,23 +18,69 @@ const AssignDelivery = () => {
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [selectedDeliveryBoyId, setSelectedDeliveryBoyId] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pagination, setPagination] = useState({
+    total: 0,
+    page: 1,
+    limit: 20,
+    pages: 1,
+  });
+  const itemsPerPage = 20;
+
+  const fetchAllActiveDeliveryBoys = async () => {
+    const first = await getAllDeliveryBoys({
+      page: 1,
+      limit: 100,
+      status: "active",
+      applicationStatus: "approved",
+    });
+    const firstRows = first?.data?.deliveryBoys || [];
+    const totalPages = Number(first?.data?.pagination?.pages || 1);
+    if (totalPages <= 1) return firstRows;
+
+    const requests = [];
+    for (let page = 2; page <= totalPages; page += 1) {
+      requests.push(
+        getAllDeliveryBoys({
+          page,
+          limit: 100,
+          status: "active",
+          applicationStatus: "approved",
+        })
+      );
+    }
+    const results = await Promise.all(requests);
+    return firstRows.concat(results.flatMap((res) => res?.data?.deliveryBoys || []));
+  };
 
   const fetchData = async () => {
     setIsLoading(true);
     try {
-      const [ordersRes, boysRes] = await Promise.all([
-        getAllOrders({ limit: 500 }),
-        getAllDeliveryBoys({
-          limit: 500,
-          status: "active",
-          applicationStatus: "approved",
-        }),
+      const orderParams = {
+        page: currentPage,
+        limit: itemsPerPage,
+        assignableOnly: true,
+      };
+      if (statusFilter !== "all") {
+        orderParams.status = statusFilter;
+      } else {
+        orderParams.onlyUnassigned = true;
+      }
+
+      const [ordersRes, boyRows] = await Promise.all([
+        getAllOrders(orderParams),
+        fetchAllActiveDeliveryBoys(),
       ]);
 
       const orderRows = ordersRes?.data?.orders || [];
-      const boyRows = boysRes?.data?.deliveryBoys || [];
 
       setOrders(orderRows);
+      setPagination({
+        total: Number(ordersRes?.data?.total || 0),
+        page: Number(ordersRes?.data?.page || 1),
+        limit: itemsPerPage,
+        pages: Number(ordersRes?.data?.pages || 1),
+      });
       setDeliveryBoys(boyRows);
     } finally {
       setIsLoading(false);
@@ -42,16 +89,17 @@ const AssignDelivery = () => {
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [currentPage, statusFilter]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [statusFilter]);
 
   const assignableOrders = useMemo(() => {
-    return orders
-      .filter((order) => ASSIGNABLE_STATUSES.includes(String(order.status || "").toLowerCase()))
-      .filter((order) => {
-        if (statusFilter === "all") return !order.deliveryBoyId;
-        return String(order.status || "").toLowerCase() === statusFilter;
-      });
-  }, [orders, statusFilter]);
+    return orders.filter((order) =>
+      ASSIGNABLE_STATUSES.includes(String(order.status || "").toLowerCase())
+    );
+  }, [orders]);
 
   const handleOpenAssign = (order) => {
     setSelectedOrder(order);
@@ -162,7 +210,17 @@ const AssignDelivery = () => {
             <p className="text-gray-500">Loading assignment data...</p>
           </div>
         ) : (
-          <DataTable data={assignableOrders} columns={columns} pagination={true} itemsPerPage={10} />
+          <>
+            <DataTable data={assignableOrders} columns={columns} pagination={false} />
+            <Pagination
+              currentPage={pagination.page || currentPage}
+              totalPages={pagination.pages || 1}
+              totalItems={pagination.total || 0}
+              itemsPerPage={itemsPerPage}
+              onPageChange={setCurrentPage}
+              className="mt-6"
+            />
+          </>
         )}
       </div>
 

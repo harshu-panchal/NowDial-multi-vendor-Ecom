@@ -1,45 +1,59 @@
 import { useState, useEffect } from 'react';
-import { FiSearch, FiMapPin, FiEdit, FiTrash2 } from 'react-icons/fi';
+import { FiSearch, FiMapPin, FiTrash2 } from 'react-icons/fi';
 import { motion } from 'framer-motion';
 import DataTable from '../../components/DataTable';
-import { useCustomerStore } from '../../../../shared/store/customerStore';
+import Pagination from '../../components/Pagination';
 import ConfirmModal from '../../components/ConfirmModal';
 import toast from 'react-hot-toast';
-import { deleteCustomerAddress } from '../../services/adminService';
+import { deleteCustomerAddress, getCustomerAddresses } from '../../services/adminService';
 
 const Addresses = () => {
-  const { customers, initialize } = useCustomerStore();
   const [addresses, setAddresses] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [deleteModal, setDeleteModal] = useState({ isOpen: false, id: null });
-
-  useEffect(() => {
-    initialize({ page: 1, limit: 200 });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    // Extract addresses from customers
-    const allAddresses = customers.flatMap((customer) =>
-      (customer.addresses || []).map((addr) => ({
-        ...addr,
-        id: addr._id || addr.id,
-        customerId: customer.id,
-        customerName: customer.name,
-        customerEmail: customer.email,
-      }))
-    );
-    setAddresses(allAddresses);
-  }, [customers]);
-
-  const filteredAddresses = addresses.filter((addr) => {
-    return (
-      !searchQuery ||
-      addr.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (addr.address || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (addr.city || '').toLowerCase().includes(searchQuery.toLowerCase())
-    );
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pagination, setPagination] = useState({
+    total: 0,
+    page: 1,
+    limit: 10,
+    pages: 0,
   });
+  const [deleteModal, setDeleteModal] = useState({ isOpen: false, id: null });
+  const itemsPerPage = 10;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const loadAddresses = async () => {
+        try {
+          const response = await getCustomerAddresses({
+            page: currentPage,
+            limit: itemsPerPage,
+            search: searchQuery || undefined,
+          });
+          const rows = (response?.data?.addresses || []).map((addr) => ({
+            ...addr,
+            id: addr._id || addr.id,
+            customerId: addr.customerId || addr.userId,
+          }));
+          setAddresses(rows);
+          setPagination(response?.data?.pagination || {
+            total: rows.length,
+            page: 1,
+            limit: itemsPerPage,
+            pages: 1,
+          });
+        } catch (error) {
+          setAddresses([]);
+        }
+      };
+      loadAddresses();
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [currentPage, searchQuery]);
 
   const handleDelete = async () => {
     const addressToDelete = addresses.find((a) => String(a.id) === String(deleteModal.id));
@@ -54,6 +68,10 @@ const Addresses = () => {
       setAddresses((prev) =>
         prev.filter((address) => String(address.id) !== String(deleteModal.id))
       );
+      setPagination((prev) => ({
+        ...prev,
+        total: Math.max(0, Number(prev.total || 0) - 1),
+      }));
       toast.success('Address deleted');
     } catch (error) {
       // Error toast is handled by api interceptor
@@ -91,7 +109,7 @@ const Addresses = () => {
       ),
     },
     {
-      key: 'type',
+      key: 'name',
       label: 'Type',
       sortable: true,
       render: (value) => (
@@ -117,12 +135,6 @@ const Addresses = () => {
       sortable: false,
       render: (_, row) => (
         <div className="flex items-center gap-2">
-          <button
-            className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-            title="Edit"
-          >
-            <FiEdit />
-          </button>
           <button
             onClick={() => setDeleteModal({ isOpen: true, id: row.id })}
             className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
@@ -161,10 +173,17 @@ const Addresses = () => {
 
       <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
         <DataTable
-          data={filteredAddresses}
+          data={addresses}
           columns={columns}
-          pagination={true}
-          itemsPerPage={10}
+          pagination={false}
+        />
+        <Pagination
+          currentPage={pagination.page || currentPage}
+          totalPages={pagination.pages || 0}
+          totalItems={pagination.total || 0}
+          itemsPerPage={itemsPerPage}
+          onPageChange={setCurrentPage}
+          className="mt-6"
         />
       </div>
 

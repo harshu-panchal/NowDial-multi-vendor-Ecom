@@ -8,7 +8,7 @@ import Pagination from '../components/Pagination';
 import Badge from '../../../shared/components/Badge';
 import AnimatedSelect from '../components/AnimatedSelect';
 import { formatDateTime } from '../utils/adminHelpers';
-import toast from 'react-hot-toast';
+import { reorderBanners as reorderBannersApi } from '../services/adminService';
 
 const Banners = () => {
   const {
@@ -37,7 +37,7 @@ const Banners = () => {
       .filter((banner) => {
         const matchesSearch =
           !searchQuery ||
-          banner.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          (banner.title || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
           (banner.subtitle &&
             banner.subtitle.toLowerCase().includes(searchQuery.toLowerCase()));
 
@@ -83,13 +83,44 @@ const Banners = () => {
     }
   };
 
-  const handleMoveUp = (banner) => {
-    // Reordering logic simplified for now as it needs backend support for 'order' field updates
-    toast.info('Reordering is coming soon with persistent backend support');
+  const handleMoveUp = async (banner) => {
+    const index = filteredBanners.findIndex((b) => b._id === banner._id);
+    if (index <= 0) return;
+
+    const current = filteredBanners[index];
+    const previous = filteredBanners[index - 1];
+    const currentOrder = Number(current.order || 0);
+    const previousOrder = Number(previous.order || 0);
+
+    try {
+      await reorderBannersApi([
+        { id: current._id, order: previousOrder },
+        { id: previous._id, order: currentOrder },
+      ]);
+      await fetchBanners();
+    } catch {
+      // Store handles toast
+    }
   };
 
-  const handleMoveDown = (banner) => {
-    toast.info('Reordering is coming soon with persistent backend support');
+  const handleMoveDown = async (banner) => {
+    const index = filteredBanners.findIndex((b) => b._id === banner._id);
+    if (index < 0 || index >= filteredBanners.length - 1) return;
+
+    const current = filteredBanners[index];
+    const next = filteredBanners[index + 1];
+    const currentOrder = Number(current.order || 0);
+    const nextOrder = Number(next.order || 0);
+
+    try {
+      await reorderBannersApi([
+        { id: current._id, order: nextOrder },
+        { id: next._id, order: currentOrder },
+      ]);
+      await fetchBanners();
+    } catch {
+      // Store handles toast
+    }
   };
 
   const handleFormClose = () => {
@@ -139,6 +170,9 @@ const Banners = () => {
             onChange={(e) => setSelectedType(e.target.value)}
             options={[
               { value: 'all', label: 'All Types' },
+              { value: 'home_slider', label: 'Home Sliders' },
+              { value: 'festival_offer', label: 'Festival Offer Banners' },
+              { value: 'banner', label: 'Generic Banners' },
               { value: 'hero', label: 'Hero Banners' },
               { value: 'promotional', label: 'Promotional Banners' },
               { value: 'side_banner', label: 'Side Banners' },
@@ -162,7 +196,7 @@ const Banners = () => {
           <ExportButton
             data={filteredBanners}
             headers={[
-              { label: 'ID', accessor: (row) => row.id },
+              { label: 'ID', accessor: (row) => row._id || row.id },
               { label: 'Type', accessor: (row) => row.type },
               { label: 'Title', accessor: (row) => row.title },
               { label: 'Subtitle', accessor: (row) => row.subtitle || '' },
@@ -215,7 +249,11 @@ const Banners = () => {
                               ? 'Promo'
                               : banner.type === 'side_banner'
                                 ? 'Side'
-                                : 'Banner'}
+                                : banner.type === 'home_slider'
+                                  ? 'Slider'
+                                  : banner.type === 'festival_offer'
+                                    ? 'Festival'
+                                    : 'Banner'}
                         </Badge>
                       </div>
                     </div>

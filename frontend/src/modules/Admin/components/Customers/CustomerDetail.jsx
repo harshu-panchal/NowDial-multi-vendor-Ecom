@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { FiX, FiMail, FiPhone, FiMapPin, FiShoppingBag, FiDollarSign, FiClock, FiEdit, FiCreditCard } from 'react-icons/fi';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -6,19 +6,21 @@ import { useCustomerStore } from '../../../../shared/store/customerStore';
 import Badge from '../../../../shared/components/Badge';
 import { formatCurrency, formatDateTime } from '../../utils/adminHelpers';
 
-const CustomerDetail = ({ customer, onClose, onUpdate }) => {
+const CustomerDetail = ({ customer, onClose, onUpdate, startEditing = false }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const isAppRoute = location.pathname.startsWith('/app');
   const { updateCustomer, toggleCustomerStatus, addActivity } = useCustomerStore();
-  const [isEditing, setIsEditing] = useState(false);
+  const [isEditing, setIsEditing] = useState(startEditing);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState({
     name: customer.name,
-    email: customer.email,
     phone: customer.phone || '',
-    status: customer.status,
   });
+
+  useEffect(() => {
+    setIsEditing(Boolean(startEditing));
+  }, [startEditing]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -29,7 +31,10 @@ const CustomerDetail = ({ customer, onClose, onUpdate }) => {
     if (isSubmitting) return;
     setIsSubmitting(true);
     try {
-      await updateCustomer(customer.id, formData);
+      await updateCustomer(customer.id, {
+        name: formData.name,
+        phone: formData.phone,
+      });
       addActivity(customer.id, {
         type: 'update',
         description: 'Customer information updated',
@@ -162,9 +167,7 @@ const CustomerDetail = ({ customer, onClose, onUpdate }) => {
                         setIsEditing(false);
                         setFormData({
                           name: customer.name,
-                          email: customer.email,
                           phone: customer.phone || '',
-                          status: customer.status,
                         });
                       }}
                       className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-semibold text-sm"
@@ -200,17 +203,7 @@ const CustomerDetail = ({ customer, onClose, onUpdate }) => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="flex items-center gap-3">
                 <FiMail className="text-gray-400" />
-                {isEditing ? (
-                  <input
-                    type="email"
-                    name="email"
-                    value={formData.email}
-                    onChange={handleChange}
-                    className="flex-1 px-3 py-1 border border-gray-300 rounded-lg"
-                  />
-                ) : (
-                  <span className="text-gray-700">{customer.email}</span>
-                )}
+                <span className="text-gray-700">{customer.email}</span>
               </div>
               {customer.phone && (
                 <div className="flex items-center gap-3">

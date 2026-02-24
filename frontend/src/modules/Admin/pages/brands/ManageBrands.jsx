@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { FiPlus, FiSearch, FiEdit, FiTrash2 } from "react-icons/fi";
+import { FiPlus, FiSearch, FiEdit, FiTrash2, FiEye, FiEyeOff } from "react-icons/fi";
 import { motion } from "framer-motion";
 import { useBrandStore } from "../../../../shared/store/brandStore";
 import BrandForm from "../../components/Brands/BrandForm";
@@ -7,10 +7,9 @@ import DataTable from "../../components/DataTable";
 import ExportButton from "../../components/ExportButton";
 import ConfirmModal from "../../components/ConfirmModal";
 import AnimatedSelect from "../../components/AnimatedSelect";
-import toast from "react-hot-toast";
 
 const ManageBrands = () => {
-  const { brands, initialize, deleteBrand } = useBrandStore();
+  const { brands, initialize, deleteBrand, toggleBrandStatus } = useBrandStore();
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedStatus, setSelectedStatus] = useState("all");
   const [showForm, setShowForm] = useState(false);
@@ -24,7 +23,8 @@ const ManageBrands = () => {
   const filteredBrands = brands.filter((brand) => {
     const matchesSearch =
       !searchQuery ||
-      brand.name.toLowerCase().includes(searchQuery.toLowerCase());
+      brand.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (brand.description || "").toLowerCase().includes(searchQuery.toLowerCase());
 
     const matchesStatus =
       selectedStatus === "all" ||
@@ -51,7 +51,6 @@ const ManageBrands = () => {
   const confirmDelete = () => {
     deleteBrand(deleteModal.id);
     setDeleteModal({ isOpen: false, id: null });
-    toast.success("Brand deleted");
   };
 
   const columns = [
@@ -90,6 +89,12 @@ const ManageBrands = () => {
       sortable: false,
       render: (_, row) => (
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => toggleBrandStatus(row.id)}
+            className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+            title={row.isActive ? "Deactivate" : "Activate"}>
+            {row.isActive ? <FiEyeOff /> : <FiEye />}
+          </button>
           <button
             onClick={() => handleEdit(row)}
             className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">

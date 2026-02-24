@@ -10,6 +10,7 @@ import toast from 'react-hot-toast';
 const SalesReport = () => {
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const [orders, setOrders] = useState([]);
+  const [summary, setSummary] = useState({ totalSales: 0, totalOrders: 0, averageOrderValue: 0 });
   const [loading, setLoading] = useState(false);
 
   const fetchOrders = useCallback(async (range = { start: '', end: '' }) => {
@@ -19,8 +20,8 @@ const SalesReport = () => {
       let page = 1;
       let totalPages = 1;
 
-      while (page <= totalPages && page <= 20) {
-        const response = await adminService.getAllOrders({
+      while (page <= totalPages) {
+        const response = await adminService.getSalesReport({
           page,
           limit: 200,
           status: 'delivered',
@@ -29,6 +30,9 @@ const SalesReport = () => {
         });
         const payload = response?.data || {};
         allOrders.push(...(payload.orders || []));
+        if (page === 1) {
+          setSummary(payload.summary || { totalSales: 0, totalOrders: 0, averageOrderValue: 0 });
+        }
         totalPages = payload.pages || 1;
         page += 1;
       }
@@ -49,10 +53,6 @@ const SalesReport = () => {
   const handleApplyFilter = () => {
     fetchOrders(dateRange);
   };
-
-  const totalSales = orders.reduce((sum, order) => sum + (order.total || 0), 0);
-  const totalOrders = orders.length;
-  const averageOrderValue = totalOrders > 0 ? totalSales / totalOrders : 0;
 
   const columns = [
     {
@@ -110,24 +110,24 @@ const SalesReport = () => {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
           <div className="flex items-center justify-between mb-2">
-            <p className="text-sm text-gray-600">Total Sales (Page)</p>
+            <p className="text-sm text-gray-600">Total Sales</p>
             <FiTrendingUp className="text-green-600" />
           </div>
-          <p className="text-2xl font-bold text-gray-800">{formatPrice(totalSales)}</p>
+          <p className="text-2xl font-bold text-gray-800">{formatPrice(summary.totalSales || 0)}</p>
         </div>
         <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
           <div className="flex items-center justify-between mb-2">
-            <p className="text-sm text-gray-600">Total Orders (Page)</p>
+            <p className="text-sm text-gray-600">Total Orders</p>
             <FiCalendar className="text-blue-600" />
           </div>
-          <p className="text-2xl font-bold text-gray-800">{totalOrders}</p>
+          <p className="text-2xl font-bold text-gray-800">{summary.totalOrders || 0}</p>
         </div>
         <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
           <div className="flex items-center justify-between mb-2">
             <p className="text-sm text-gray-600">Average Order Value</p>
             <FiTrendingUp className="text-purple-600" />
           </div>
-          <p className="text-2xl font-bold text-gray-800">{formatPrice(averageOrderValue)}</p>
+          <p className="text-2xl font-bold text-gray-800">{formatPrice(summary.averageOrderValue || 0)}</p>
         </div>
       </div>
 

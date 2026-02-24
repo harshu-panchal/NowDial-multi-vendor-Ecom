@@ -231,7 +231,20 @@ export const getProfile = asyncHandler(async (req, res) => {
 
 // PUT /api/vendor/auth/profile
 export const updateProfile = asyncHandler(async (req, res) => {
-    const allowed = ['name', 'phone', 'storeName', 'storeDescription', 'storeLogo', 'address'];
+    const allowed = [
+        'name',
+        'phone',
+        'storeName',
+        'storeDescription',
+        'storeLogo',
+        'address',
+        'shippingEnabled',
+        'freeShippingThreshold',
+        'defaultShippingRate',
+        'shippingMethods',
+        'handlingTime',
+        'processingTime',
+    ];
     const updates = Object.fromEntries(Object.entries(req.body).filter(([k]) => allowed.includes(k)));
     const vendor = await Vendor.findByIdAndUpdate(req.user.id, updates, { new: true, runValidators: true }).select('-password -otp -otpExpiry');
     res.status(200).json(new ApiResponse(200, vendor, 'Profile updated.'));

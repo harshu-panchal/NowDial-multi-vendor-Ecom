@@ -25,6 +25,14 @@ import {
 } from "../../services/vendorService";
 import toast from "react-hot-toast";
 
+const statusTransitions = {
+  pending: ["approved", "rejected"],
+  approved: ["processing", "completed"],
+  processing: ["completed"],
+  rejected: [],
+  completed: [],
+};
+
 const ReturnRequestDetail = () => {
   const navigate = useNavigate();
   const { id } = useParams();
@@ -58,7 +66,11 @@ const ReturnRequestDetail = () => {
     fetchReturnRequest();
   }, [id, navigate, vendorId]);
 
-  const handleStatusUpdate = async (newStatus, action = "") => {
+  const handleStatusUpdate = async (
+    newStatus,
+    action = "",
+    options = {}
+  ) => {
     const statusData = { status: newStatus };
     if (newStatus === "approved" && action === "approve") {
       statusData.refundStatus = "pending";
@@ -72,6 +84,9 @@ const ReturnRequestDetail = () => {
       returnRequest?.refundStatus !== "processed"
     ) {
       statusData.refundStatus = "pending";
+    }
+    if (newStatus === "rejected" && options?.rejectionReason !== undefined) {
+      statusData.rejectionReason = options.rejectionReason;
     }
 
     try {
@@ -96,6 +111,14 @@ const ReturnRequestDetail = () => {
 
   const handleStatusSave = () => {
     if (status !== returnRequest.status) {
+      if (status === "rejected") {
+        const reason = window.prompt(
+          "Optional rejection reason (visible in return details):",
+          returnRequest?.rejectionReason || ""
+        );
+        handleStatusUpdate(status, "", { rejectionReason: reason || "" });
+        return;
+      }
       handleStatusUpdate(status);
     } else {
       setIsEditing(false);
@@ -120,6 +143,14 @@ const ReturnRequestDetail = () => {
       </div>
     );
   }
+
+  const allowedNextStatuses = statusTransitions[returnRequest.status] || [];
+  const editableStatusOptions = [returnRequest.status, ...allowedNextStatuses]
+    .filter((value, index, arr) => arr.indexOf(value) === index)
+    .map((value) => ({
+      value,
+      label: value.charAt(0).toUpperCase() + value.slice(1),
+    }));
 
   return (
     <motion.div
@@ -150,13 +181,7 @@ const ReturnRequestDetail = () => {
               <AnimatedSelect
                 value={status}
                 onChange={(e) => setStatus(e.target.value)}
-                options={[
-                  { value: "pending", label: "Pending" },
-                  { value: "approved", label: "Approved" },
-                  { value: "processing", label: "Processing" },
-                  { value: "completed", label: "Completed" },
-                  { value: "rejected", label: "Rejected" },
-                ]}
+                options={editableStatusOptions}
                 className="min-w-[140px]"
               />
               <button
@@ -209,7 +234,13 @@ const ReturnRequestDetail = () => {
                           "Are you sure you want to reject this return request?"
                         )
                       ) {
-                        handleStatusUpdate("rejected", "reject");
+                        const reason = window.prompt(
+                          "Optional rejection reason (visible in return details):",
+                          returnRequest?.rejectionReason || ""
+                        );
+                        handleStatusUpdate("rejected", "reject", {
+                          rejectionReason: reason || "",
+                        });
                       }
                     }}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm font-semibold">

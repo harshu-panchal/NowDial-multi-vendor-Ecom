@@ -168,7 +168,6 @@ import VendorChat from "./modules/Vendor/pages/Chat";
 import VendorReturnRequests from "./modules/Vendor/pages/ReturnRequests";
 import VendorReturnRequestDetail from "./modules/Vendor/pages/returns/ReturnRequestDetail";
 import VendorProductReviews from "./modules/Vendor/pages/ProductReviews";
-import VendorPromotions from "./modules/Vendor/pages/Promotions";
 import VendorShippingManagement from "./modules/Vendor/pages/ShippingManagement";
 import VendorCustomers from "./modules/Vendor/pages/Customers";
 import VendorCustomerDetail from "./modules/Vendor/pages/CustomerDetail";
@@ -591,7 +590,6 @@ const AppRoutes = () => {
           element={<VendorReturnRequestDetail />}
         />
         <Route path="product-reviews" element={<VendorProductReviews />} />
-        <Route path="promotions" element={<VendorPromotions />} />
         <Route
           path="shipping-management"
           element={<VendorShippingManagement />}

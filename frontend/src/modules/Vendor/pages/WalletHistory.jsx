@@ -1,9 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import {
   FiDollarSign,
-  FiTrendingUp,
-  FiDownload,
-  FiFilter,
   FiClock,
   FiCheckCircle,
 } from "react-icons/fi";
@@ -13,67 +10,70 @@ import ExportButton from "../../Admin/components/ExportButton";
 import AnimatedSelect from "../../Admin/components/AnimatedSelect";
 import { formatPrice } from "../../../shared/utils/helpers";
 import { useVendorAuthStore } from "../store/vendorAuthStore";
-import { useCommissionStore } from "../../../shared/store/commissionStore";
-import { useOrderStore } from "../../../shared/store/orderStore";
+import { getVendorEarnings } from "../services/vendorService";
 
 const WalletHistory = () => {
   const { vendor } = useVendorAuthStore();
-  const {
-    getVendorCommissions,
-    getVendorEarningsSummary,
-    getVendorSettlements,
-  } = useCommissionStore();
-  const { orders } = useOrderStore();
 
   const [transactions, setTransactions] = useState([]);
   const [filterType, setFilterType] = useState("all");
   const [dateRange, setDateRange] = useState({ start: "", end: "" });
   const [walletSummary, setWalletSummary] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
 
-  const vendorId = vendor?.id;
+  const vendorId = vendor?.id || vendor?._id;
 
   useEffect(() => {
     if (!vendorId) return;
 
-    const commissions = getVendorCommissions(vendorId);
-    const settlements = getVendorSettlements(vendorId);
-    const summary = getVendorEarningsSummary(vendorId);
+    const fetchWallet = async () => {
+      setIsLoading(true);
+      try {
+        const res = await getVendorEarnings();
+        const data = res?.data ?? res;
+        const commissions = Array.isArray(data?.commissions) ? data.commissions : [];
+        const settlements = Array.isArray(data?.settlements) ? data.settlements : [];
 
-    // Combine commissions and settlements into transactions
-    const allTransactions = [
-      ...commissions.map((c) => ({
-        id: c.id,
-        type: "earning",
-        orderId: c.orderId,
-        amount: c.vendorEarnings,
-        commission: c.commission,
-        status: c.status,
-        date: c.createdAt,
-        description: `Earning from Order ${c.orderId}`,
-        paymentMethod: null,
-        transactionId: null,
-      })),
-      ...settlements.map((s) => ({
-        id: s.id,
-        type: "settlement",
-        orderId: null,
-        amount: s.amount,
-        commission: 0,
-        status: "paid",
-        date: s.createdAt,
-        description: `Settlement Payment`,
-        paymentMethod: s.paymentMethod,
-        transactionId: s.transactionId,
-      })),
-    ].sort((a, b) => new Date(b.date) - new Date(a.date));
+        const allTransactions = [
+          ...commissions.map((c) => ({
+            id: c._id || c.id,
+            type: "earning",
+            orderId: c.orderDisplayId || c.orderRef || c.orderId,
+            amount: c.vendorEarnings,
+            commission: c.commission,
+            status: c.effectiveStatus || c.status,
+            date: c.createdAt,
+            description: `Earning from Order ${c.orderDisplayId || c.orderRef || c.orderId}`,
+            paymentMethod: null,
+            transactionId: null,
+          })),
+          ...settlements.map((s) => ({
+            id: s._id || s.id,
+            type: "settlement",
+            orderId: null,
+            amount: s.amount,
+            commission: 0,
+            status: s.status === "failed" ? "failed" : "paid",
+            date: s.createdAt,
+            description: "Settlement Payment",
+            paymentMethod: s.paymentMethod,
+            transactionId: s.transactionId,
+          })),
+        ].sort((a, b) => new Date(b.date) - new Date(a.date));
 
-    setTransactions(allTransactions);
-    setWalletSummary(summary);
+        setTransactions(allTransactions);
+        setWalletSummary(data?.summary || null);
+      } catch {
+        setTransactions([]);
+        setWalletSummary(null);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchWallet();
   }, [
     vendorId,
-    getVendorCommissions,
-    getVendorSettlements,
-    getVendorEarningsSummary,
   ]);
 
   const filteredTransactions = useMemo(() => {
@@ -288,7 +288,11 @@ const WalletHistory = () => {
         </div>
 
         {/* Transactions Table */}
-        {filteredTransactions.length > 0 ? (
+        {isLoading ? (
+          <div className="text-center py-12">
+            <p className="text-gray-500">Loading wallet history...</p>
+          </div>
+        ) : filteredTransactions.length > 0 ? (
           <div className="space-y-3">
             {filteredTransactions.map((transaction) => (
               <div

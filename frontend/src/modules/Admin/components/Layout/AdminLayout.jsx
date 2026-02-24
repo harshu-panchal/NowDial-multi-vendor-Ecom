@@ -28,11 +28,11 @@ const AdminLayout = () => {
 
         {/* Page Content - with dynamic padding to account for fixed header and bottom nav */}
         <main 
-          className="flex-1 p-3 sm:p-4 lg:p-6 overflow-y-auto overflow-x-hidden lg:pb-6 lg:pt-24 scrollbar-admin w-full min-w-0"
+          className="flex-1 p-3 sm:p-4 lg:p-6 overflow-y-auto overflow-x-hidden lg:pb-6 scrollbar-admin w-full min-w-0"
           style={{
             // Mobile: Use calculated heights with safe area support
-            // Desktop: Tailwind classes override these (lg:pt-24, lg:pb-6)
-            paddingTop: `${Math.max(topPadding, 80)}px`, // Use calculated height or 80px (pt-20), whichever is larger
+            // Desktop: use the same computed top spacing for consistency
+            paddingTop: `${Math.max(topPadding, 80)}px`, // Use calculated height or 80px, whichever is larger
             paddingBottom: `calc(${Math.max(bottomPadding, 80)}px + env(safe-area-inset-bottom, 0px))`, // Use calculated height + safe area or 80px + safe area, whichever is larger
           }}
         >

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, matchPath, useNavigate } from "react-router-dom";
 import { FiHeart } from "react-icons/fi";
 import MobileLayout from "../components/Layout/MobileLayout";
 import ProductCard from "../../../shared/components/ProductCard";
@@ -139,11 +139,43 @@ const extractResponseData = (response) => {
 };
 
 const asList = (value) => (Array.isArray(value) ? value : []);
-const resolveBannerLink = (banner, fallback = "/offers") => {
+const KNOWN_USER_ROUTE_PATTERNS = [
+  "/",
+  "/home",
+  "/search",
+  "/offers",
+  "/daily-deals",
+  "/flash-sale",
+  "/new-arrivals",
+  "/categories",
+  "/category/:id",
+  "/brand/:id",
+  "/seller/:id",
+  "/product/:id",
+  "/sale/:slug",
+  "/track-order/:orderId",
+];
+
+const getPathnameFromTarget = (target) =>
+  String(target || "").trim().split("?")[0].split("#")[0];
+
+const isKnownInternalRoute = (target) => {
+  const pathname = getPathnameFromTarget(target);
+  if (!pathname) return false;
+  return KNOWN_USER_ROUTE_PATTERNS.some((pattern) =>
+    !!matchPath({ path: pattern, end: true }, pathname)
+  );
+};
+
+const resolveBannerLink = (banner) => {
   const candidate = String(
     banner?.linkUrl || banner?.link || banner?.url || ""
   ).trim();
-  return candidate || fallback;
+  if (!candidate) return "";
+  if (isExternalLink(candidate)) return candidate;
+  if (isSafeInternalPath(candidate) && isKnownInternalRoute(candidate))
+    return candidate;
+  return "";
 };
 
 const isExternalLink = (target) => /^https?:\/\//i.test(String(target || "").trim());
@@ -205,16 +237,14 @@ const MobileHome = () => {
 
   const fetchHomeData = useCallback(async () => {
     try {
-      const [productsRes, vendorsRes, brandsRes, homeSlidesRes, promoRes, sideBannerRes] =
+      const [productsRes, vendorsRes, brandsRes, bannersRes] =
         await Promise.allSettled([
           api.get("/products", { params: { page: 1, limit: 120 } }),
           api.get("/vendors/all", {
             params: { status: "approved", page: 1, limit: 50 },
           }),
           api.get("/brands/all"),
-          api.get("/banners", { params: { type: "home_slider" } }),
-          api.get("/banners", { params: { type: "promotional" } }),
-          api.get("/banners", { params: { type: "side_banner" } }),
+          api.get("/banners"),
         ]);
 
       if (productsRes.status === "fulfilled") {
@@ -246,27 +276,27 @@ const MobileHome = () => {
         );
       }
 
-      if (homeSlidesRes.status === "fulfilled") {
-        const payload = extractResponseData(homeSlidesRes.value);
-        const bannerSlides = asList(payload)
-          .filter((banner) => banner?.image && banner?.isActive !== false)
+      if (bannersRes.status === "fulfilled") {
+        const payload = extractResponseData(bannersRes.value);
+        const allBanners = asList(payload).filter(
+          (banner) => banner?.image && banner?.isActive !== false
+        );
+
+        const bannerSlides = allBanners
+          .filter((banner) =>
+            ["home_slider", "hero"].includes(String(banner?.type || ""))
+          )
           .sort((a, b) => toNumber(a.order, 0) - toNumber(b.order, 0))
           .map((banner, index) => ({
             id: normalizeId(banner._id || banner.id || `home-slide-${index}`),
             image: banner.image,
-            link: resolveBannerLink(banner, "/offers"),
+            link: resolveBannerLink(banner),
             title: banner.title || "",
           }));
-
         setSlides(bannerSlides.length > 0 ? bannerSlides : DEFAULT_HERO_SLIDES);
-      } else {
-        setSlides(DEFAULT_HERO_SLIDES);
-      }
 
-      if (promoRes.status === "fulfilled") {
-        const payload = extractResponseData(promoRes.value);
-        const banners = asList(payload)
-          .filter((banner) => banner?.image && banner?.isActive !== false)
+        const banners = allBanners
+          .filter((banner) => String(banner?.type || "") === "promotional")
           .sort((a, b) => toNumber(a.order, 0) - toNumber(b.order, 0))
           .map((banner, index) => ({
             id: normalizeId(banner._id || banner.id || `promo-banner-${index}`),
@@ -274,29 +304,26 @@ const MobileHome = () => {
             subtitle: banner.subtitle || "Limited Time",
             description: banner.description || "",
             discount: banner.description || "Shop Now",
-            link: resolveBannerLink(banner, "/offers"),
+            link: resolveBannerLink(banner),
             image: banner.image,
             type: banner.type || "promotional",
           }));
         setPromoBanners(banners);
-      } else {
-        setPromoBanners([]);
-      }
 
-      if (sideBannerRes.status === "fulfilled") {
-        const payload = extractResponseData(sideBannerRes.value);
-        const mapped = asList(payload)
-          .filter((banner) => banner?.image && banner?.isActive !== false)
+        const mapped = allBanners
+          .filter((banner) => String(banner?.type || "") === "side_banner")
           .sort((a, b) => toNumber(a.order, 0) - toNumber(b.order, 0))
           .map((banner, index) => ({
             id: normalizeId(banner._id || banner.id || `side-banner-${index}`),
             image: banner.image,
             title: banner.title || "PREMIUM",
             subtitle: banner.subtitle || "Exclusive Collection",
-            link: resolveBannerLink(banner, "/offers"),
+            link: resolveBannerLink(banner),
           }));
         setSideBanner(mapped[0] || null);
       } else {
+        setSlides(DEFAULT_HERO_SLIDES);
+        setPromoBanners([]);
         setSideBanner(null);
       }
       return true;
@@ -407,7 +434,7 @@ const MobileHome = () => {
       window.open(normalizedTarget, "_blank", "noopener,noreferrer");
       return;
     }
-    if (isSafeInternalPath(normalizedTarget)) {
+    if (isSafeInternalPath(normalizedTarget) && isKnownInternalRoute(normalizedTarget)) {
       navigate(normalizedTarget);
     }
   };

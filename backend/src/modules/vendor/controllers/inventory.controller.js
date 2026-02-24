@@ -2,14 +2,11 @@ import asyncHandler from '../../../utils/asyncHandler.js';
 import ApiResponse from '../../../utils/ApiResponse.js';
 import Product from '../../../models/Product.model.js';
 import Order from '../../../models/Order.model.js';
-
-const getItemProductId = (item) => {
-    const raw = item?.productId ?? item?._id ?? item?.id ?? null;
-    return raw ? String(raw) : null;
-};
+import mongoose from 'mongoose';
 
 export const getInventoryReport = asyncHandler(async (req, res) => {
     const { lowStockOnly } = req.query;
+    const vendorObjectId = new mongoose.Types.ObjectId(req.user.id);
 
     const products = await Product.find({ vendorId: req.user.id })
         .select('name price stockQuantity lowStockThreshold')
@@ -32,19 +29,34 @@ export const getInventoryReport = asyncHandler(async (req, res) => {
         };
     }
 
-    const orders = await Order.find({ 'vendorItems.vendorId': req.user.id })
-        .select('vendorItems')
-        .lean();
+    const soldRows = await Order.aggregate([
+        {
+            $match: {
+                'vendorItems.vendorId': vendorObjectId,
+                status: { $nin: ['cancelled', 'returned'] },
+                isDeleted: { $ne: true },
+            },
+        },
+        { $unwind: '$vendorItems' },
+        {
+            $match: {
+                'vendorItems.vendorId': vendorObjectId,
+                'vendorItems.status': { $ne: 'cancelled' },
+            },
+        },
+        { $unwind: '$vendorItems.items' },
+        {
+            $group: {
+                _id: '$vendorItems.items.productId',
+                sold: { $sum: { $ifNull: ['$vendorItems.items.quantity', 1] } },
+            },
+        },
+    ]);
 
-    for (const order of orders) {
-        for (const vendorItem of order.vendorItems || []) {
-            if (String(vendorItem?.vendorId) !== String(req.user.id)) continue;
-            for (const item of vendorItem.items || []) {
-                const productId = getItemProductId(item);
-                if (!productId || !reportMap[productId]) continue;
-                reportMap[productId].sold += Number(item?.quantity || 1);
-            }
-        }
+    for (const row of soldRows) {
+        const productId = String(row?._id || '');
+        if (!productId || !reportMap[productId]) continue;
+        reportMap[productId].sold = Number(row?.sold || 0);
     }
 
     let rows = Object.values(reportMap);
@@ -61,7 +73,9 @@ export const getInventoryReport = asyncHandler(async (req, res) => {
         totalStockValue: rows.reduce((sum, row) => sum + row.stockValue, 0),
         totalUnitsSold: rows.reduce((sum, row) => sum + row.sold, 0),
         lowStockItems: rows.filter(
-            (row) => row.currentStock <= Number(row.lowStockThreshold || 10)
+            (row) =>
+                row.currentStock > 0 &&
+                row.currentStock <= Number(row.lowStockThreshold || 10)
         ).length,
     };
 

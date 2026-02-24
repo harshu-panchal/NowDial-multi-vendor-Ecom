@@ -15,6 +15,8 @@ import { motion } from "framer-motion";
 import { useCartStore, useUIStore } from "../../../shared/store/useStore";
 import { useWishlistStore } from "../../../shared/store/wishlistStore";
 import { useReviewsStore } from "../../../shared/store/reviewsStore";
+import { useOrderStore } from "../../../shared/store/orderStore";
+import { useAuthStore } from "../../../shared/store/authStore";
 import {
   getProductById,
   getSimilarProducts,
@@ -26,6 +28,7 @@ import toast from "react-hot-toast";
 import MobileLayout from "../components/Layout/MobileLayout";
 import ImageGallery from "../../../shared/components/Product/ImageGallery";
 import VariantSelector from "../../../shared/components/Product/VariantSelector";
+import ReviewForm from "../../../shared/components/Product/ReviewForm";
 import MobileProductCard from "../components/Mobile/MobileProductCard";
 import PageTransition from "../../../shared/components/PageTransition";
 import Badge from "../../../shared/components/Badge";
@@ -69,6 +72,8 @@ const resolveVariantPrice = (product, selectedVariant) => {
   return basePrice;
 };
 
+const isMongoId = (value) => /^[a-fA-F0-9]{24}$/.test(String(value || ""));
+
 const MobileProductDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -87,7 +92,9 @@ const MobileProductDetail = () => {
     removeItem: removeFromWishlist,
     isInWishlist,
   } = useWishlistStore();
-  const { fetchReviews, sortReviews } = useReviewsStore();
+  const { fetchReviews, sortReviews, addReview } = useReviewsStore();
+  const { getAllOrders } = useOrderStore();
+  const { user, isAuthenticated } = useAuthStore();
 
   const isFavorite = product ? isInWishlist(product.id) : false;
   const isInCart = product ? items.some((item) => item.id === product.id) : false;
@@ -207,6 +214,38 @@ const MobileProductDetail = () => {
       }))
       .filter((faq) => faq.question && faq.answer);
   }, [product?.faqs]);
+
+  const eligibleDeliveredOrderId = useMemo(() => {
+    if (!isAuthenticated || !user?.id || !isMongoId(product?.id)) return null;
+    const userOrders = getAllOrders(user.id) || [];
+    const eligibleOrder = userOrders.find((order) => {
+      if (String(order?.status || "").toLowerCase() !== "delivered") return false;
+      const items = Array.isArray(order?.items) ? order.items : [];
+      return items.some(
+        (item) => String(item?.productId || item?.id || "") === String(product.id)
+      );
+    });
+    return eligibleOrder?._id || null;
+  }, [isAuthenticated, user?.id, product?.id, getAllOrders]);
+
+  const handleSubmitReview = async (reviewData) => {
+    if (!eligibleDeliveredOrderId) {
+      toast.error("You can review only after this product is delivered");
+      return false;
+    }
+
+    const ok = await addReview(product.id, {
+      ...reviewData,
+      orderId: eligibleDeliveredOrderId,
+    });
+    if (!ok) {
+      toast.error("Unable to submit review");
+      return false;
+    }
+
+    await fetchReviews(product.id, { sort: "newest", limit: 50 });
+    return true;
+  };
 
   return (
     <PageTransition>
@@ -480,6 +519,22 @@ const MobileProductDetail = () => {
                   </div>
                 )}
 
+                {/* Write Review */}
+                {isAuthenticated && isMongoId(product?.id) && (
+                  <div className="pt-6">
+                    {eligibleDeliveredOrderId ? (
+                      <ReviewForm
+                        productId={product.id}
+                        onSubmit={handleSubmitReview}
+                      />
+                    ) : (
+                      <div className="bg-gray-50 border border-gray-100 rounded-2xl p-4 text-sm text-gray-600">
+                        Reviews are available after product delivery.
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Reviews List */}
                 {productReviews.length > 0 && (
                   <div className="pt-6">
@@ -504,6 +559,14 @@ const MobileProductDetail = () => {
                             </div>
                           </div>
                           <p className="text-sm text-gray-600 leading-relaxed pl-10">{review.comment}</p>
+                          {review.vendorResponse && (
+                            <div className="mt-3 ml-10 bg-primary-50 border border-primary-100 rounded-lg p-3">
+                              <p className="text-xs font-semibold text-primary-700 mb-1">
+                                Vendor Response
+                              </p>
+                              <p className="text-sm text-primary-800">{review.vendorResponse}</p>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>

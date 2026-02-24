@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { FiSearch } from 'react-icons/fi';
 import { motion } from 'framer-motion';
 import { useCustomerStore } from '../../../../shared/store/customerStore';
@@ -11,11 +12,13 @@ import { formatPrice } from '../../../../shared/utils/helpers';
 
 const ViewCustomers = () => {
   const { customers, pagination, initialize } = useCustomerStore();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('all');
   const [viewMode, setViewMode] = useState('grid');
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [showDetail, setShowDetail] = useState(false);
+  const [startInEditMode, setStartInEditMode] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
 
@@ -34,15 +37,32 @@ const ViewCustomers = () => {
     setCurrentPage(1);
   }, [searchQuery, selectedStatus]);
 
-  const handleViewCustomer = (customer) => {
+  const handleViewCustomer = (customer, editMode = false) => {
     setSelectedCustomer(customer);
+    setStartInEditMode(editMode);
     setShowDetail(true);
   };
 
   const handleCloseDetail = () => {
     setShowDetail(false);
     setSelectedCustomer(null);
+    setStartInEditMode(false);
+    if (searchParams.get('edit')) {
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('edit');
+        return next;
+      });
+    }
   };
+
+  useEffect(() => {
+    const editId = searchParams.get('edit');
+    if (!editId || customers.length === 0 || showDetail) return;
+    const target = customers.find((customer) => String(customer.id) === String(editId));
+    if (!target) return;
+    handleViewCustomer(target, true);
+  }, [customers, searchParams, showDetail]);
 
   const columns = [
     {
@@ -207,6 +227,7 @@ const ViewCustomers = () => {
         <CustomerDetail
           customer={selectedCustomer}
           onClose={handleCloseDetail}
+          startEditing={startInEditMode}
           onUpdate={() => {
             initialize({
               page: currentPage,

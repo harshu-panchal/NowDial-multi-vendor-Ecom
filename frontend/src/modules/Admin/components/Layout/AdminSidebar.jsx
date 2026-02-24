@@ -400,7 +400,7 @@ const AdminSidebar = ({ isOpen, onClose }) => {
       </AnimatePresence>
 
       {/* Sidebar - Desktop Fixed */}
-      <div className="hidden lg:flex fixed left-0 top-0 bottom-0 w-64 z-30">
+      <div className="hidden lg:flex fixed left-0 top-0 bottom-0 w-64 z-40">
         {sidebarContent}
       </div>
     </>

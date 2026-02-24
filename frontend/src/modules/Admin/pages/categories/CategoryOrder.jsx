@@ -5,7 +5,7 @@ import { useCategoryStore } from '../../../../shared/store/categoryStore';
 import toast from 'react-hot-toast';
 
 const CategoryOrder = () => {
-  const { categories, initialize } = useCategoryStore();
+  const { categories, initialize, reorderCategories } = useCategoryStore();
   const [orderedCategories, setOrderedCategories] = useState([]);
 
   useEffect(() => {
@@ -15,7 +15,7 @@ const CategoryOrder = () => {
   useEffect(() => {
     // Filter out subcategories (only show root categories)
     const rootCategories = categories.filter((cat) => !cat.parentId);
-    setOrderedCategories([...rootCategories].sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0)));
+    setOrderedCategories([...rootCategories].sort((a, b) => (a.order || 0) - (b.order || 0)));
   }, [categories]);
 
   const moveUp = (index) => {
@@ -32,15 +32,12 @@ const CategoryOrder = () => {
     setOrderedCategories(newOrder);
   };
 
-  const handleSave = () => {
-    const updatedCategories = orderedCategories.map((cat, index) => ({
-      ...cat,
-      displayOrder: index + 1,
-    }));
-
-    // In a real app, you would save this to the backend
-    localStorage.setItem('categories', JSON.stringify(updatedCategories));
-    toast.success('Category order saved successfully');
+  const handleSave = async () => {
+    const orderIds = orderedCategories.map((cat) => String(cat.id));
+    const ok = await reorderCategories(orderIds);
+    if (!ok) {
+      toast.error('Failed to save category order');
+    }
   };
 
   return (
@@ -110,7 +107,7 @@ const CategoryOrder = () => {
                   </div>
                 </div>
                 <div className="text-sm text-gray-500">
-                  Order: {category.displayOrder || index + 1}
+                  Order: {category.order || index + 1}
                 </div>
               </div>
             ))}

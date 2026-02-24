@@ -18,20 +18,22 @@ const ProfitLossChart = ({ data, period = "month" }) => {
   const chartData = useMemo(() => {
     return data.map((item) => {
       const revenue = item.revenue || 0;
-      const costOfGoods = revenue * 0.6;
-      const operatingExpenses = revenue * 0.2;
-      const grossProfit = revenue - costOfGoods;
-      const netProfit = grossProfit - operatingExpenses;
+      const discount = item.discount || 0;
+      const tax = item.tax || 0;
+      const shipping = item.delivery || 0;
+      const grossProfit = revenue - discount;
+      const netProfit = revenue - (discount + tax + shipping);
 
       return {
         date: item.date,
         dateLabel: formatDate(item.date, { month: "short", day: "numeric" }),
         revenue,
-        costOfGoods,
-        operatingExpenses,
+        discount,
+        tax,
+        shipping,
         grossProfit,
         netProfit,
-        totalExpenses: costOfGoods + operatingExpenses,
+        totalExpenses: discount + tax + shipping,
       };
     });
   }, [data]);

@@ -29,16 +29,25 @@ export const getDashboardStats = asyncHandler(async (req, res) => {
 
 // GET /api/admin/analytics/revenue
 export const getRevenueData = asyncHandler(async (req, res) => {
-    const { period = 'monthly' } = req.query;
+    const { period = 'monthly', startDate, endDate } = req.query;
     const groupFormat = period === 'daily' ? '%Y-%m-%d' : period === 'weekly' ? '%Y-%U' : '%Y-%m';
+    const match = { isDeleted: { $ne: true }, status: { $ne: 'cancelled' } };
+    if (startDate || endDate) {
+        match.createdAt = {};
+        if (startDate) match.createdAt.$gte = new Date(startDate);
+        if (endDate) match.createdAt.$lte = new Date(new Date(endDate).setHours(23, 59, 59, 999));
+    }
 
-    const revenue = await Order.aggregate([
-        { $match: { isDeleted: { $ne: true }, status: { $ne: 'cancelled' } } },
+    const pipeline = [
+        { $match: match },
         { $group: { _id: { $dateToString: { format: groupFormat, date: '$createdAt' } }, revenue: { $sum: '$total' }, orders: { $sum: 1 } } },
-        { $sort: { _id: -1 } },
-        { $limit: 12 },
-        { $sort: { _id: 1 } },
-    ]);
+    ];
+    if (!startDate && !endDate) {
+        pipeline.push({ $sort: { _id: -1 } }, { $limit: 12 });
+    }
+    pipeline.push({ $sort: { _id: 1 } });
+
+    const revenue = await Order.aggregate(pipeline);
 
     res.status(200).json(new ApiResponse(200, revenue, 'Revenue data fetched.'));
 });
@@ -58,7 +67,7 @@ export const getOrderStatusBreakdown = asyncHandler(async (req, res) => {
 // GET /api/admin/analytics/top-products
 export const getTopProducts = asyncHandler(async (req, res) => {
     const topProducts = await Order.aggregate([
-        { $match: { isDeleted: { $ne: true } } },
+        { $match: { isDeleted: { $ne: true }, status: { $ne: 'cancelled' } } },
         { $unwind: '$items' },
         { $group: { _id: '$items.productId', totalSold: { $sum: '$items.quantity' }, revenue: { $sum: { $multiply: ['$items.price', '$items.quantity'] } } } },
         { $sort: { totalSold: -1 } },
@@ -109,41 +118,60 @@ export const getRecentOrders = asyncHandler(async (req, res) => {
 
 // GET /api/admin/analytics/sales
 export const getSalesData = asyncHandler(async (req, res) => {
-    const { period = 'monthly' } = req.query;
+    const { period = 'monthly', startDate, endDate } = req.query;
     const groupFormat = period === 'daily' ? '%Y-%m-%d' : period === 'weekly' ? '%Y-%U' : '%Y-%m';
+    const match = { isDeleted: { $ne: true }, status: { $ne: 'cancelled' } };
+    if (startDate || endDate) {
+        match.createdAt = {};
+        if (startDate) match.createdAt.$gte = new Date(startDate);
+        if (endDate) match.createdAt.$lte = new Date(new Date(endDate).setHours(23, 59, 59, 999));
+    }
 
-    const sales = await Order.aggregate([
-        { $match: { isDeleted: { $ne: true }, status: { $ne: 'cancelled' } } },
+    const pipeline = [
+        { $match: match },
         { $group: { _id: { $dateToString: { format: groupFormat, date: '$createdAt' } }, sales: { $sum: '$total' }, orders: { $sum: 1 } } },
-        { $sort: { _id: -1 } },
-        { $limit: 12 },
-        { $sort: { _id: 1 } },
-    ]);
+    ];
+    if (!startDate && !endDate) {
+        pipeline.push({ $sort: { _id: -1 } }, { $limit: 12 });
+    }
+    pipeline.push({ $sort: { _id: 1 } });
+
+    const sales = await Order.aggregate(pipeline);
 
     res.status(200).json(new ApiResponse(200, sales, 'Sales data fetched.'));
 });
 
 // GET /api/admin/analytics/finance-summary
 export const getFinancialSummary = asyncHandler(async (req, res) => {
-    const { period = 'monthly' } = req.query;
+    const { period = 'monthly', startDate, endDate } = req.query;
     const groupFormat = period === 'daily' ? '%Y-%m-%d' : period === 'weekly' ? '%Y-%U' : '%Y-%m';
+    const match = { isDeleted: { $ne: true }, status: { $ne: 'cancelled' } };
+    if (startDate || endDate) {
+        match.createdAt = {};
+        if (startDate) match.createdAt.$gte = new Date(startDate);
+        if (endDate) match.createdAt.$lte = new Date(new Date(endDate).setHours(23, 59, 59, 999));
+    }
 
-    const summary = await Order.aggregate([
-        { $match: { isDeleted: { $ne: true }, status: { $ne: 'cancelled' } } },
+    const pipeline = [
+        { $match: match },
         {
             $group: {
                 _id: { $dateToString: { format: groupFormat, date: '$createdAt' } },
                 revenue: { $sum: '$total' },
+                subtotal: { $sum: '$subtotal' },
                 tax: { $sum: '$tax' },
                 delivery: { $sum: '$shipping' },
                 discount: { $sum: '$discount' },
                 orders: { $sum: 1 }
             }
         },
-        { $sort: { _id: -1 } },
-        { $limit: 12 },
-        { $sort: { _id: 1 } },
-    ]);
+    ];
+    if (!startDate && !endDate) {
+        pipeline.push({ $sort: { _id: -1 } }, { $limit: 12 });
+    }
+    pipeline.push({ $sort: { _id: 1 } });
+
+    const summary = await Order.aggregate(pipeline);
 
     res.status(200).json(new ApiResponse(200, summary, 'Financial summary fetched.'));
 });

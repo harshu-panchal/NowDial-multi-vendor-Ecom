@@ -197,6 +197,11 @@ export const updateProduct = asyncHandler(async (req, res) => {
     if (Object.prototype.hasOwnProperty.call(req.body, 'variants')) {
         product.variants = normalizeVariantsPayload(req.body.variants, product.price);
     }
+    // Keep stock state deterministic from quantity + threshold.
+    product.stock = deriveStockStatus(
+        Number(product.stockQuantity ?? 0),
+        Number(product.lowStockThreshold ?? 10)
+    );
     await product.save();
     res.status(200).json(new ApiResponse(200, product, 'Product updated.'));
 });
@@ -215,7 +220,11 @@ export const updateStock = asyncHandler(async (req, res) => {
     if (!product) throw new ApiError(404, 'Product not found.');
 
     const numericStockQuantity = Number(stockQuantity);
-    if (!Number.isFinite(numericStockQuantity) || numericStockQuantity < 0) {
+    if (
+        !Number.isFinite(numericStockQuantity) ||
+        numericStockQuantity < 0 ||
+        !Number.isInteger(numericStockQuantity)
+    ) {
         throw new ApiError(400, 'Invalid stock quantity.');
     }
 

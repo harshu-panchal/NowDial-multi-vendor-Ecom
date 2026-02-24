@@ -12,7 +12,7 @@ import Badge from "../../../../shared/components/Badge";
 import AnimatedSelect from "../../../Admin/components/AnimatedSelect";
 import { formatPrice } from '../../../../shared/utils/helpers';
 import { useVendorAuthStore } from '../../store/vendorAuthStore';
-import { getVendorOrders, updateVendorOrderStatus } from '../../services/vendorService';
+import { getAllVendorOrders, updateVendorOrderStatus } from '../../services/vendorService';
 import toast from 'react-hot-toast';
 
 const AllOrders = () => {
@@ -31,8 +31,7 @@ const AllOrders = () => {
     const fetchOrders = async () => {
       setIsLoading(true);
       try {
-        const res = await getVendorOrders({ limit: 200 });
-        const data = res?.data ?? res;
+        const data = await getAllVendorOrders({ limit: 100 });
         setOrders(data?.orders ?? []);
       } catch {
         // errors handled by api.js toast

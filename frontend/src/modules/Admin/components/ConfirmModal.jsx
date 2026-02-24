@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { FiAlertTriangle, FiX } from 'react-icons/fi';
 import Button from './Button';
 
-const ConfirmModal = ({ isOpen, onClose, onConfirm, title, message, confirmText = 'Confirm', cancelText = 'Cancel', type = 'danger' }) => {
+const ConfirmModal = ({ isOpen, onClose, onConfirm, title, message, confirmText = 'Confirm', cancelText = 'Cancel', type = 'danger', customContent = null }) => {
   const location = useLocation();
   const isAppRoute = location.pathname.startsWith('/app');
   
@@ -113,6 +113,10 @@ const ConfirmModal = ({ isOpen, onClose, onConfirm, title, message, confirmText 
               <p className="text-sm sm:text-base text-gray-600 text-center mb-6">
                 {message}
               </p>
+
+              {customContent ? (
+                <div className="mb-6">{customContent}</div>
+              ) : null}
 
               {/* Actions */}
               <div className="flex flex-col sm:flex-row gap-3">

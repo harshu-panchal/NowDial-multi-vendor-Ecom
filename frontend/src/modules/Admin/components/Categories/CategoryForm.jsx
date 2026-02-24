@@ -118,7 +118,28 @@ const CategoryForm = ({ category, parentId, onClose, onSave }) => {
   // Get available parent categories (exclude current category and its children)
   const getAvailableParents = () => {
     if (!isEdit) return categories.filter((cat) => cat.isActive);
-    return categories.filter((cat) => cat.id !== category.id && cat.isActive);
+
+    const descendants = new Set();
+    const queue = [String(category.id)];
+    while (queue.length > 0) {
+      const currentId = queue.shift();
+      categories.forEach((cat) => {
+        const parent = typeof cat.parentId === "object"
+          ? (cat.parentId?._id ?? cat.parentId?.id ?? null)
+          : cat.parentId;
+        if (parent && String(parent) === String(currentId) && !descendants.has(String(cat.id))) {
+          descendants.add(String(cat.id));
+          queue.push(String(cat.id));
+        }
+      });
+    }
+
+    return categories.filter(
+      (cat) =>
+        cat.isActive &&
+        String(cat.id) !== String(category.id) &&
+        !descendants.has(String(cat.id))
+    );
   };
 
   return (
@@ -253,7 +274,7 @@ const CategoryForm = ({ category, parentId, onClose, onSave }) => {
                     <label className="block text-sm font-semibold text-gray-700 mb-2">
                       Parent Category
                     </label>
-                    {isSubcategory || (isEdit && category.parentId) ? (
+                    {isSubcategory ? (
                       <div className="w-full px-4 py-2.5 bg-gray-50 border border-gray-300 rounded-lg">
                         <div className="flex items-center gap-2">
                           <span className="text-gray-700 font-medium">

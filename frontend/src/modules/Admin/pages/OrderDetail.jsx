@@ -83,7 +83,7 @@ const OrderDetail = () => {
     );
   }
 
-  const statusOptions = ['pending', 'processing', 'shipped', 'delivered', 'cancelled'];
+  const statusOptions = ['pending', 'processing', 'shipped', 'delivered', 'cancelled', 'returned'];
 
   // Handle items - could be a number or an array
   const itemsCount = Array.isArray(order.items) ? order.items.length : (typeof order.items === 'number' ? order.items : 0);

@@ -11,6 +11,7 @@ import { generateOrderId } from '../../../utils/generateOrderId.js';
 import { generateTrackingNumber } from '../../../utils/generateTrackingNumber.js';
 import mongoose from 'mongoose';
 import { createNotification } from '../../../services/notification.service.js';
+import { calculateVendorShippingForGroups } from '../../../services/vendorShipping.service.js';
 
 const normalizeVariantPart = (value) => String(value || '').trim().toLowerCase();
 
@@ -99,7 +100,10 @@ export const placeOrder = asyncHandler(async (req, res) => {
     const vendorMap = {};
 
     for (const item of items) {
-        const product = await Product.findById(item.productId).populate('vendorId', 'commissionRate storeName');
+        const product = await Product.findById(item.productId).populate(
+            'vendorId',
+            'commissionRate storeName shippingEnabled defaultShippingRate freeShippingThreshold'
+        );
         if (!product) throw new ApiError(404, `Product not found: ${item.productId}`);
         if (product.stock === 'out_of_stock') throw new ApiError(400, `${product.name} is out of stock.`);
         if (product.stockQuantity < item.quantity) throw new ApiError(400, `Only ${product.stockQuantity} units of ${product.name} available.`);
@@ -115,7 +119,16 @@ export const placeOrder = asyncHandler(async (req, res) => {
         // Group by vendor
         const vid = product.vendorId._id.toString();
         if (!vendorMap[vid]) {
-            vendorMap[vid] = { vendorId: product.vendorId._id, vendorName: product.vendorId.storeName, commissionRate: product.vendorId.commissionRate || 10, items: [], subtotal: 0 };
+            vendorMap[vid] = {
+                vendorId: product.vendorId._id,
+                vendorName: product.vendorId.storeName,
+                commissionRate: product.vendorId.commissionRate || 10,
+                shippingEnabled: product.vendorId.shippingEnabled !== false,
+                defaultShippingRate: product.vendorId.defaultShippingRate,
+                freeShippingThreshold: product.vendorId.freeShippingThreshold,
+                items: [],
+                subtotal: 0,
+            };
         }
         vendorMap[vid].items.push(enriched);
         vendorMap[vid].subtotal += itemSubtotal;
@@ -142,13 +155,19 @@ export const placeOrder = asyncHandler(async (req, res) => {
     }
 
     // 3. Calculate shipping
-    const FREE_SHIPPING_THRESHOLD = 100;
-    let shipping = 0;
-    if (!appliedCoupon || appliedCoupon.type !== 'freeship') {
-        if (subtotal < FREE_SHIPPING_THRESHOLD) {
-            shipping = shippingOption === 'express' ? 100 : 50;
-        }
-    }
+    const vendorShippingInput = Object.values(vendorMap).map((vendorGroup) => ({
+        vendorId: vendorGroup.vendorId,
+        subtotal: vendorGroup.subtotal,
+        shippingEnabled: vendorGroup.shippingEnabled,
+        defaultShippingRate: vendorGroup.defaultShippingRate,
+        freeShippingThreshold: vendorGroup.freeShippingThreshold,
+    }));
+    const { totalShipping: shipping, shippingByVendor } = await calculateVendorShippingForGroups({
+        vendorGroups: vendorShippingInput,
+        shippingAddress,
+        shippingOption,
+        couponType: appliedCoupon?.type || null,
+    });
 
     // 4. Calculate tax (18%)
     const tax = parseFloat(((subtotal - couponDiscount) * 0.18).toFixed(2));
@@ -160,7 +179,7 @@ export const placeOrder = asyncHandler(async (req, res) => {
         vendorName: v.vendorName,
         items: v.items,
         subtotal: v.subtotal,
-        shipping: 0,
+        shipping: Number(shippingByVendor[String(v.vendorId)] || 0),
         tax: parseFloat((v.subtotal * 0.18).toFixed(2)),
         discount: 0,
         status: 'pending',
@@ -248,7 +267,25 @@ export const placeOrder = asyncHandler(async (req, res) => {
 
             // 9. Increment coupon usage
             if (appliedCoupon) {
-                await Coupon.findByIdAndUpdate(appliedCoupon._id, { $inc: { usedCount: 1 } }, { session });
+                if (appliedCoupon.usageLimit) {
+                    const usageResult = await Coupon.updateOne(
+                        {
+                            _id: appliedCoupon._id,
+                            usedCount: { $lt: appliedCoupon.usageLimit },
+                        },
+                        { $inc: { usedCount: 1 } },
+                        { session }
+                    );
+                    if (!usageResult?.modifiedCount) {
+                        throw new ApiError(409, 'Coupon usage limit reached.');
+                    }
+                } else {
+                    await Coupon.updateOne(
+                        { _id: appliedCoupon._id },
+                        { $inc: { usedCount: 1 } },
+                        { session }
+                    );
+                }
             }
         });
     } catch (err) {

@@ -23,31 +23,41 @@ const ReturnRequests = () => {
   const [dateFilter, setDateFilter] = useState('all');
 
   useEffect(() => {
-    fetchReturnRequests({
-      search: searchQuery,
-      status: selectedStatus === 'all' ? undefined : selectedStatus
-    });
-  }, [searchQuery, selectedStatus, fetchReturnRequests]);
-
-  const filteredRequests = useMemo(() => {
-    if (dateFilter === 'all') return returnRequests;
-
     const now = new Date();
-    const threshold = new Date();
+    const formatDate = (date) => date.toISOString().slice(0, 10);
+    let startDate;
+    let endDate;
 
     if (dateFilter === 'today') {
-      threshold.setHours(0, 0, 0, 0);
+      const today = new Date(now);
+      today.setHours(0, 0, 0, 0);
+      startDate = formatDate(today);
+      endDate = formatDate(today);
     } else if (dateFilter === 'week') {
-      threshold.setDate(now.getDate() - 7);
+      const weekStart = new Date(now);
+      weekStart.setDate(now.getDate() - 7);
+      weekStart.setHours(0, 0, 0, 0);
+      startDate = formatDate(weekStart);
+      endDate = formatDate(now);
     } else if (dateFilter === 'month') {
-      threshold.setDate(now.getDate() - 30);
+      const monthStart = new Date(now);
+      monthStart.setDate(now.getDate() - 30);
+      monthStart.setHours(0, 0, 0, 0);
+      startDate = formatDate(monthStart);
+      endDate = formatDate(now);
     }
 
-    return returnRequests.filter((req) => {
-      const requestDate = new Date(req.requestDate);
-      return requestDate >= threshold;
+    fetchReturnRequests({
+      search: searchQuery,
+      status: selectedStatus === 'all' ? undefined : selectedStatus,
+      startDate,
+      endDate,
     });
-  }, [returnRequests, dateFilter]);
+  }, [searchQuery, selectedStatus, dateFilter, fetchReturnRequests]);
+
+  const filteredRequests = useMemo(() => {
+    return returnRequests;
+  }, [returnRequests]);
 
   // Handle status update
   const handleStatusUpdate = async (requestId, newStatus, action = '') => {
@@ -325,7 +335,7 @@ const ReturnRequests = () => {
           data={filteredRequests}
           columns={columns}
           pagination={true}
-          itemsPerPage={pagination?.limit || 10}
+          itemsPerPage={10}
           onRowClick={(row) => navigate(`/admin/return-requests/${row.id}`)}
         />
       )}

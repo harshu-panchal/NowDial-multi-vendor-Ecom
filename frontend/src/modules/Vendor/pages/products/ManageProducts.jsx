@@ -31,7 +31,7 @@ const ManageProducts = () => {
   useEffect(() => {
     initCategories();
     if (vendorId) {
-      fetchProducts({ limit: 500 });
+      fetchProducts({ fetchAll: true, limit: 200 });
     }
   }, [vendorId, initCategories, fetchProducts]);
 

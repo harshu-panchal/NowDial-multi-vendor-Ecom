@@ -5,7 +5,7 @@ import TaxTrendsChart from "../../components/Analytics/TaxTrendsChart";
 import DataTable from "../../components/DataTable";
 import ExportButton from "../../components/ExportButton";
 import { formatPrice } from '../../../../shared/utils/helpers';
-import { getAllOrders } from "../../services/adminService";
+import { getSalesReport } from "../../services/adminService";
 
 const TaxReports = () => {
   const [orders, setOrders] = useState([]);
@@ -22,8 +22,8 @@ const TaxReports = () => {
         let page = 1;
         let totalPages = 1;
 
-        while (page <= totalPages && page <= 20) {
-          const response = await getAllOrders({ page, limit: 200 });
+        while (page <= totalPages) {
+          const response = await getSalesReport({ page, limit: 200, status: 'delivered' });
           const payload = response?.data || {};
           allOrders.push(...(payload.orders || []));
           totalPages = payload.pages || 1;

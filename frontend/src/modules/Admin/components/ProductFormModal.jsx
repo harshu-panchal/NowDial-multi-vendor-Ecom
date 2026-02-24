@@ -215,10 +215,10 @@ const ProductFormModal = ({ isOpen, onClose, productId, onSuccess }) => {
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
-    setFormData({
-      ...formData,
+    setFormData((prev) => ({
+      ...prev,
       [name]: type === "checkbox" ? checked : value,
-    });
+    }));
   };
 
   const handleImageUpload = async (e) => {
@@ -343,6 +343,11 @@ const ProductFormModal = ({ isOpen, onClose, productId, onSuccess }) => {
       return;
     }
 
+    if (!formData.categoryId && !formData.subcategoryId) {
+      toast.error("Please select a category");
+      return;
+    }
+
     const hasInvalidFaq = (formData.faqs || []).some((faq) => {
       const question = String(faq?.question || "").trim();
       const answer = String(faq?.answer || "").trim();
@@ -355,6 +360,11 @@ const ProductFormModal = ({ isOpen, onClose, productId, onSuccess }) => {
 
     // Determine final categoryId - use subcategoryId if selected, otherwise categoryId
     const finalCategoryId = formData.subcategoryId || formData.categoryId || null;
+
+    if (!finalCategoryId) {
+      toast.error("Please select a valid category");
+      return;
+    }
 
     const submissionData = {
       ...formData,

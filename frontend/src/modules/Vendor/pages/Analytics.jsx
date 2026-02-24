@@ -14,6 +14,7 @@ import RevenueVsOrdersChart from "../../Admin/components/Analytics/RevenueVsOrde
 import TimePeriodFilter from "../../Admin/components/Analytics/TimePeriodFilter";
 import ExportButton from "../../Admin/components/ExportButton";
 import { formatPrice } from "../../../shared/utils/helpers";
+import { filterByDateRange, getDateRange } from "../../Admin/utils/adminHelpers";
 import { useVendorAuthStore } from "../store/vendorAuthStore";
 import { getVendorAnalyticsOverview } from "../services/vendorService";
 
@@ -48,7 +49,7 @@ const Analytics = () => {
     const fetchData = async () => {
       setIsLoading(true);
       try {
-        const res = await getVendorAnalyticsOverview();
+        const res = await getVendorAnalyticsOverview({ period });
         const data = res?.data ?? res;
 
         const timeseries = Array.isArray(data?.timeseries) ? data.timeseries : [];
@@ -75,7 +76,12 @@ const Analytics = () => {
     };
 
     fetchData();
-  }, [vendorId]);
+  }, [vendorId, period]);
+
+  const exportData = useMemo(() => {
+    const range = getDateRange(period);
+    return filterByDateRange(analyticsData, range.start, range.end);
+  }, [analyticsData, period]);
 
   const analyticsSummary = useMemo(() => {
     const recentRevenue = analyticsData.slice(-7).reduce((sum, d) => sum + d.revenue, 0);
@@ -117,6 +123,14 @@ const Analytics = () => {
     );
   }
 
+  if (isLoading) {
+    return (
+      <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-200">
+        <p className="text-gray-500 text-center">Loading analytics...</p>
+      </div>
+    );
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -133,7 +147,7 @@ const Analytics = () => {
         <div className="flex items-center gap-3">
           <TimePeriodFilter selectedPeriod={period} onPeriodChange={setPeriod} />
           <ExportButton
-            data={analyticsData}
+            data={exportData}
             headers={[
               { label: "Date", accessor: (row) => row.date },
               { label: "Revenue", accessor: (row) => formatPrice(row.revenue) },
@@ -147,7 +161,7 @@ const Analytics = () => {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
           <div className="flex items-center justify-between mb-2">
-            <p className="text-sm text-gray-600">Total Earnings</p>
+            <p className="text-sm text-gray-600">Total Revenue</p>
             <FiDollarSign className="text-green-600" />
           </div>
           <p className="text-2xl font-bold text-gray-800">
@@ -218,12 +232,6 @@ const Analytics = () => {
           <p className="text-sm text-gray-400">
             Analytics will appear here once you start receiving orders
           </p>
-        </div>
-      )}
-
-      {isLoading && (
-        <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-200">
-          <p className="text-gray-500 text-center">Loading analytics...</p>
         </div>
       )}
     </motion.div>

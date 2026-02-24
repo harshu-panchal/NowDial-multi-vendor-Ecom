@@ -2,9 +2,45 @@ import ReturnRequest from '../../../models/ReturnRequest.model.js';
 import Order from '../../../models/Order.model.js';
 import User from '../../../models/User.model.js';
 import Product from '../../../models/Product.model.js';
+import { createNotification } from '../../../services/notification.service.js';
 import { ApiError } from '../../../utils/ApiError.js';
 import { ApiResponse } from '../../../utils/ApiResponse.js';
 import { asyncHandler } from '../../../utils/asyncHandler.js';
+
+const enrichReturnItems = (request) => {
+    const orderItems = Array.isArray(request?.orderId?.items) ? request.orderId.items : [];
+    const returnItems = Array.isArray(request?.items) ? request.items : [];
+
+    return returnItems.map((item) => {
+        const productId = String(item?.productId || '');
+        const matchedOrderItem = orderItems.find(
+            (orderItem) => String(orderItem?.productId || '') === productId
+        );
+
+        return {
+            ...item,
+            name: item?.name || matchedOrderItem?.name || 'Unknown Product',
+            price: Number(item?.price ?? matchedOrderItem?.price ?? 0),
+            image: item?.image || matchedOrderItem?.image || '',
+        };
+    });
+};
+
+const normalizeReturnRequest = (request) => ({
+    ...request._doc,
+    id: request._id,
+    customer: request.userId
+        ? {
+            name: request.userId.name,
+            email: request.userId.email,
+            phone: request.userId.phone
+        }
+        : { name: 'Guest', email: 'N/A' },
+    orderId: request.orderId?.orderId || 'N/A',
+    orderRefId: request.orderId?._id || null,
+    requestDate: request.createdAt,
+    items: enrichReturnItems(request),
+});
 
 /**
  * @desc    Get all return requests with filtering and pagination
@@ -12,7 +48,7 @@ import { asyncHandler } from '../../../utils/asyncHandler.js';
  * @access  Private (Admin)
  */
 export const getAllReturnRequests = asyncHandler(async (req, res) => {
-    const { page = 1, limit = 10, search = '', status } = req.query;
+    const { page = 1, limit = 10, search = '', status, startDate, endDate } = req.query;
     const numericPage = Number(page) || 1;
     const numericLimit = Number(limit) || 10;
 
@@ -20,6 +56,11 @@ export const getAllReturnRequests = asyncHandler(async (req, res) => {
 
     if (status && status !== 'all') {
         filter.status = status;
+    }
+    if (startDate || endDate) {
+        filter.createdAt = {};
+        if (startDate) filter.createdAt.$gte = new Date(startDate);
+        if (endDate) filter.createdAt.$lte = new Date(new Date(endDate).setHours(23, 59, 59, 999));
     }
 
     // Search by return id, order number, customer fields, and reason text
@@ -63,17 +104,7 @@ export const getAllReturnRequests = asyncHandler(async (req, res) => {
     const total = await ReturnRequest.countDocuments(filter);
 
     // Normalize data for frontend
-    const normalizedRequests = returnRequests.map(req => ({
-        ...req._doc,
-        id: req._id,
-        customer: req.userId ? {
-            name: req.userId.name,
-            email: req.userId.email,
-            phone: req.userId.phone
-        } : { name: 'Guest', email: 'N/A' },
-        orderId: req.orderId ? req.orderId.orderId : 'N/A',
-        requestDate: req.createdAt
-    }));
+    const normalizedRequests = returnRequests.map(normalizeReturnRequest);
 
     res.status(200).json(
         new ApiResponse(200, {
@@ -96,7 +127,7 @@ export const getAllReturnRequests = asyncHandler(async (req, res) => {
 export const getReturnRequestById = asyncHandler(async (req, res) => {
     const request = await ReturnRequest.findById(req.params.id)
         .populate('userId', 'name email phone')
-        .populate('orderId', 'orderId total createdAt')
+        .populate('orderId', 'orderId total createdAt items')
         .populate('vendorId', 'shopName email');
 
     if (!request) {
@@ -104,18 +135,7 @@ export const getReturnRequestById = asyncHandler(async (req, res) => {
     }
 
     // Normalize
-    const normalized = {
-        ...request._doc,
-        id: request._id,
-        customer: request.userId ? {
-            name: request.userId.name,
-            email: request.userId.email,
-            phone: request.userId.phone
-        } : { name: 'Guest', email: 'N/A' },
-        orderId: request.orderId?.orderId || 'N/A',
-        orderRefId: request.orderId?._id || null,
-        requestDate: request.createdAt
-    };
+    const normalized = normalizeReturnRequest(request);
 
     res.status(200).json(
         new ApiResponse(200, normalized, 'Return request details fetched successfully')
@@ -132,7 +152,7 @@ export const updateReturnRequestStatus = asyncHandler(async (req, res) => {
 
     const request = await ReturnRequest.findById(req.params.id)
         .populate('userId', 'name email phone')
-        .populate('orderId', 'orderId total');
+        .populate('orderId', 'orderId total items');
 
     if (!request) {
         throw new ApiError(404, 'Return request not found');
@@ -234,17 +254,48 @@ export const updateReturnRequestStatus = asyncHandler(async (req, res) => {
         }
     }
 
-    const normalized = {
-        ...request._doc,
-        id: request._id,
-        customer: request.userId ? {
-            name: request.userId.name,
-            email: request.userId.email,
-            phone: request.userId.phone
-        } : { name: 'Guest', email: 'N/A' },
-        orderId: request.orderId?.orderId || 'N/A',
-        requestDate: request.createdAt
-    };
+    const notificationTasks = [];
+    if (request.userId?._id) {
+        notificationTasks.push(
+            createNotification({
+                recipientId: request.userId._id,
+                recipientType: 'user',
+                title: 'Return request updated',
+                message: `Your return request for order ${request.orderId?.orderId || request.orderId} is now ${request.status}.`,
+                type: 'order',
+                data: {
+                    returnRequestId: String(request._id),
+                    orderId: String(request.orderId?.orderId || request.orderId || ''),
+                    status: String(request.status || ''),
+                    refundStatus: String(request.refundStatus || ''),
+                },
+            })
+        );
+    }
+
+    if (request.vendorId) {
+        notificationTasks.push(
+            createNotification({
+                recipientId: request.vendorId,
+                recipientType: 'vendor',
+                title: 'Return request updated by admin',
+                message: `Return request for order ${request.orderId?.orderId || request.orderId} is now ${request.status}.`,
+                type: 'order',
+                data: {
+                    returnRequestId: String(request._id),
+                    orderId: String(request.orderId?.orderId || request.orderId || ''),
+                    status: String(request.status || ''),
+                    refundStatus: String(request.refundStatus || ''),
+                },
+            })
+        );
+    }
+
+    if (notificationTasks.length > 0) {
+        await Promise.allSettled(notificationTasks);
+    }
+
+    const normalized = normalizeReturnRequest(request);
 
     res.status(200).json(new ApiResponse(200, normalized, 'Return request status updated successfully'));
 });

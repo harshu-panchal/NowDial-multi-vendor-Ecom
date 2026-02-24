@@ -17,7 +17,7 @@ import Badge from '../../../../shared/components/Badge';
 import DataTable from '../../components/DataTable';
 import { formatPrice } from '../../../../shared/utils/helpers';
 import { formatDateTime } from '../../utils/adminHelpers';
-import { getAllOrders } from '../../services/adminService';
+import { getCustomerOrders } from '../../services/adminService';
 
 import toast from 'react-hot-toast';
 
@@ -49,12 +49,22 @@ const CustomerDetailPage = () => {
       if (!customer?.id) return;
 
       try {
-        const response = await getAllOrders({
-          page: 1,
-          limit: 500,
-          userId: customer.id,
-        });
-        const customerOrders = response?.data?.orders || [];
+        const firstResponse = await getCustomerOrders(customer.id, { page: 1, limit: 100 });
+        const firstOrders = firstResponse?.data?.orders || [];
+        const totalPages = Number(firstResponse?.data?.pagination?.pages || 1);
+
+        let customerOrders = [...firstOrders];
+        if (totalPages > 1) {
+          const pageRequests = [];
+          for (let page = 2; page <= totalPages; page += 1) {
+            pageRequests.push(getCustomerOrders(customer.id, { page, limit: 100 }));
+          }
+          const remaining = await Promise.all(pageRequests);
+          customerOrders = customerOrders.concat(
+            remaining.flatMap((response) => response?.data?.orders || [])
+          );
+        }
+
         setOrders(customerOrders);
 
         const paymentStatusMap = {
@@ -348,7 +358,7 @@ const CustomerDetailPage = () => {
             {customer.status}
           </Badge>
           <button
-            onClick={() => navigate(`/admin/customers?edit=${customer.id}`)}
+            onClick={() => navigate(`/admin/customers/view-customers?edit=${customer.id}`)}
             className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors font-semibold text-sm flex items-center gap-2"
           >
             <FiEdit />

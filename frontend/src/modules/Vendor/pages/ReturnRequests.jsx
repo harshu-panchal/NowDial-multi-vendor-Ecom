@@ -9,7 +9,7 @@ import AnimatedSelect from "../../Admin/components/AnimatedSelect";
 import { formatPrice } from "../../../shared/utils/helpers";
 import { useVendorAuthStore } from "../store/vendorAuthStore";
 import {
-  getVendorReturnRequests,
+  getAllVendorReturnRequests,
   updateVendorReturnRequestStatus,
 } from "../services/vendorService";
 import toast from "react-hot-toast";
@@ -34,7 +34,7 @@ const ReturnRequests = () => {
     const fetchReturnRequests = async () => {
       setIsLoading(true);
       try {
-        const res = await getVendorReturnRequests({ limit: 500 });
+        const res = await getAllVendorReturnRequests({ limit: 100 });
         const payload = res?.data ?? res;
         setReturnRequests(payload?.returnRequests ?? []);
       } catch {
@@ -106,12 +106,20 @@ const ReturnRequests = () => {
   }, [returnRequests, searchQuery, selectedStatus, dateFilter]);
 
   // Handle status update
-  const handleStatusUpdate = async (requestId, newStatus, action = "") => {
+  const handleStatusUpdate = async (
+    requestId,
+    newStatus,
+    action = "",
+    options = {}
+  ) => {
     const statusData = { status: newStatus };
     if (newStatus === "approved" && action === "approve") {
       statusData.refundStatus = "pending";
     } else if (newStatus === "completed" && action === "process-refund") {
       statusData.refundStatus = "processed";
+    }
+    if (newStatus === "rejected" && options?.rejectionReason) {
+      statusData.rejectionReason = options.rejectionReason;
     }
 
     try {
@@ -254,7 +262,13 @@ const ReturnRequests = () => {
                       "Are you sure you want to reject this return request?"
                     )
                   ) {
-                    handleStatusUpdate(row.id, "rejected", "reject");
+                    const reason = window.prompt(
+                      "Optional rejection reason (visible in return details):",
+                      ""
+                    );
+                    handleStatusUpdate(row.id, "rejected", "reject", {
+                      rejectionReason: reason || "",
+                    });
                   }
                 }}
                 className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"

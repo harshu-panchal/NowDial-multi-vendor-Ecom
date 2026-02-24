@@ -26,6 +26,44 @@ const toValidDateOrNull = (value) => {
     return Number.isNaN(date.getTime()) ? null : date;
 };
 
+const isExternalLink = (value) => /^https?:\/\//i.test(String(value || '').trim());
+const isSafeInternalPath = (value) => String(value || '').trim().startsWith('/');
+const KNOWN_BANNER_INTERNAL_ROUTE_PATTERNS = [
+    /^\/$/,
+    /^\/home$/,
+    /^\/search$/,
+    /^\/offers$/,
+    /^\/daily-deals$/,
+    /^\/flash-sale$/,
+    /^\/new-arrivals$/,
+    /^\/categories$/,
+    /^\/category\/[^/?#]+$/,
+    /^\/brand\/[^/?#]+$/,
+    /^\/seller\/[^/?#]+$/,
+    /^\/product\/[^/?#]+$/,
+    /^\/sale\/[^/?#]+$/,
+    /^\/track-order\/[^/?#]+$/,
+];
+const getPathnameFromTarget = (target) =>
+    String(target || '').trim().split('?')[0].split('#')[0];
+const isKnownBannerInternalPath = (target) => {
+    const pathname = getPathnameFromTarget(target);
+    if (!pathname) return false;
+    return KNOWN_BANNER_INTERNAL_ROUTE_PATTERNS.some((pattern) => pattern.test(pathname));
+};
+const normalizeBannerLink = (value) => {
+    const candidate = String(value || '').trim();
+    if (!candidate) return '';
+    if (isExternalLink(candidate)) return candidate;
+    if (isSafeInternalPath(candidate) && isKnownBannerInternalPath(candidate)) return candidate;
+    return '';
+};
+
+const normalizeBannerPayload = (payload = {}) => ({
+    ...payload,
+    link: normalizeBannerLink(payload?.link),
+});
+
 const normalizeObjectIdList = (values) => {
     if (!Array.isArray(values)) return [];
     return values
@@ -91,6 +129,20 @@ const syncCampaignBanner = async (campaign, previousRoute = null) => {
     if (bannerPayload.image) {
         await Banner.create(bannerPayload);
     }
+};
+
+const deactivateCampaignBannersByRoutes = async (routes = []) => {
+    const uniqueRoutes = [...new Set(
+        routes
+            .map((route) => String(route || '').trim())
+            .filter(Boolean)
+    )];
+    if (!uniqueRoutes.length) return;
+
+    await Banner.updateMany(
+        { type: 'promotional', link: { $in: uniqueRoutes } },
+        { $set: { isActive: false } }
+    );
 };
 
 const formatCoupon = (couponDoc) => {
@@ -191,6 +243,18 @@ const normalizeCouponPayload = (payload, { partial = false } = {}) => {
     return normalized;
 };
 
+const validateCouponBusinessRules = ({ type, value }) => {
+    if (type === 'percentage') {
+        const parsedValue = Number(value);
+        if (!Number.isFinite(parsedValue)) {
+            throw new ApiError(400, 'Coupon value must be a valid number');
+        }
+        if (parsedValue > 100) {
+            throw new ApiError(400, 'Percentage coupon value cannot exceed 100');
+        }
+    }
+};
+
 // ─── Coupons (Promo Codes) ──────────────────────────────────────────────────
 export const getAllCoupons = asyncHandler(async (req, res) => {
     const { page = 1, limit = 10, status } = req.query;
@@ -235,6 +299,12 @@ export const getAllCoupons = asyncHandler(async (req, res) => {
 
 export const createCoupon = asyncHandler(async (req, res) => {
     const payload = normalizeCouponPayload(req.body);
+    validateCouponBusinessRules({ type: payload.type, value: payload.value });
+
+    if (payload.type === 'freeship') {
+        payload.value = 0;
+        payload.maxDiscount = undefined;
+    }
 
     if (payload.startsAt && payload.expiresAt && payload.startsAt >= payload.expiresAt) {
         throw new ApiError(400, 'End date must be after start date');
@@ -252,6 +322,15 @@ export const updateCoupon = asyncHandler(async (req, res) => {
 
     const coupon = await Coupon.findById(req.params.id);
     if (!coupon) throw new ApiError(404, 'Coupon not found');
+
+    const effectiveType = payload.type !== undefined ? payload.type : coupon.type;
+    const effectiveValue = payload.value !== undefined ? payload.value : coupon.value;
+    validateCouponBusinessRules({ type: effectiveType, value: effectiveValue });
+
+    if (effectiveType === 'freeship') {
+        payload.value = 0;
+        payload.maxDiscount = undefined;
+    }
 
     if (payload.code && payload.code !== coupon.code) {
         const existingCoupon = await Coupon.findOne({ code: payload.code, _id: { $ne: coupon._id } });
@@ -283,14 +362,41 @@ export const getAllBanners = asyncHandler(async (req, res) => {
 });
 
 export const createBanner = asyncHandler(async (req, res) => {
-    const banner = await Banner.create(req.body);
+    const banner = await Banner.create(normalizeBannerPayload(req.body));
     return res.status(201).json(new ApiResponse(201, banner, 'Banner created successfully'));
 });
 
 export const updateBanner = asyncHandler(async (req, res) => {
-    const banner = await Banner.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    const banner = await Banner.findByIdAndUpdate(
+        req.params.id,
+        normalizeBannerPayload(req.body),
+        { new: true }
+    );
     if (!banner) throw new ApiError(404, 'Banner not found');
     return res.status(200).json(new ApiResponse(200, banner, 'Banner updated successfully'));
+});
+
+export const reorderBanners = asyncHandler(async (req, res) => {
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+    if (items.length < 2) {
+        throw new ApiError(400, 'At least two banners are required for reorder');
+    }
+
+    const ops = items
+        .filter((item) => item?.id && Number.isFinite(Number(item?.order)))
+        .map((item) => ({
+            updateOne: {
+                filter: { _id: String(item.id) },
+                update: { $set: { order: Number(item.order) } },
+            },
+        }));
+
+    if (ops.length < 2) {
+        throw new ApiError(400, 'Invalid reorder payload');
+    }
+
+    await Banner.bulkWrite(ops, { ordered: true });
+    return res.status(200).json(new ApiResponse(200, null, 'Banners reordered successfully'));
 });
 
 export const deleteBanner = asyncHandler(async (req, res) => {
@@ -339,12 +445,18 @@ export const updateCampaign = asyncHandler(async (req, res) => {
     const campaign = await Campaign.findByIdAndUpdate(req.params.id, payload, { new: true });
     if (!campaign) throw new ApiError(404, 'Campaign not found');
 
-    await syncCampaignBanner(campaign, existing.route || null);
+    if (campaign.autoCreateBanner) {
+        await syncCampaignBanner(campaign, existing.route || null);
+    } else {
+        await deactivateCampaignBannersByRoutes([existing.route, campaign.route]);
+    }
+
     return res.status(200).json(new ApiResponse(200, campaign, 'Campaign updated successfully'));
 });
 
 export const deleteCampaign = asyncHandler(async (req, res) => {
     const campaign = await Campaign.findByIdAndDelete(req.params.id);
     if (!campaign) throw new ApiError(404, 'Campaign not found');
+    await deactivateCampaignBannersByRoutes([campaign.route]);
     return res.status(200).json(new ApiResponse(200, null, 'Campaign deleted successfully'));
 });

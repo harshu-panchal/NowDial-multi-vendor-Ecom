@@ -3,14 +3,13 @@ import { FiPackage, FiAlertCircle, FiTrendingDown } from 'react-icons/fi';
 import { motion } from 'framer-motion';
 import DataTable from '../../components/DataTable';
 import ExportButton from '../../components/ExportButton';
-import { useAnalyticsStore } from '../../../../shared/store/analyticsStore';
 import { formatPrice } from '../../../../shared/utils/helpers';
 import * as adminService from '../../services/adminService';
 
 const InventoryReport = () => {
   const [products, setProducts] = useState([]);
+  const [summary, setSummary] = useState({ totalProducts: 0, activeProducts: 0, lowStock: 0, outOfStock: 0, totalValue: 0 });
   const [productsLoading, setProductsLoading] = useState(true);
-  const { inventoryStats, isLoading: statsLoading, fetchInventoryStats } = useAnalyticsStore();
 
   useEffect(() => {
     let mounted = true;
@@ -22,10 +21,13 @@ const InventoryReport = () => {
         let page = 1;
         let totalPages = 1;
 
-        while (page <= totalPages && page <= 20) {
-          const response = await adminService.getAllProducts({ page, limit: 200 });
+        while (page <= totalPages) {
+          const response = await adminService.getInventoryReport({ page, limit: 200 });
           const payload = response?.data || {};
           allProducts.push(...(payload.products || []));
+          if (page === 1) {
+            setSummary(payload.summary || { totalProducts: 0, activeProducts: 0, lowStock: 0, outOfStock: 0, totalValue: 0 });
+          }
           totalPages = payload.pages || 1;
           page += 1;
         }
@@ -47,31 +49,16 @@ const InventoryReport = () => {
     };
 
     fetchAllProducts();
-    fetchInventoryStats();
 
     return () => {
       mounted = false;
     };
-  }, [fetchInventoryStats]);
+  }, []);
 
   const stats = useMemo(() => {
-    const totalProducts = products.length;
     const inStock = products.filter(p => (p.stockQuantity || 0) > 5).length;
-    const lowStock = products.filter(p => (p.stockQuantity || 0) <= 5 && (p.stockQuantity || 0) > 0).length;
-    const outOfStock = products.filter(p => (p.stockQuantity || 0) === 0).length;
-    const activeProducts = products.filter(p => p.isActive !== false).length;
-    const totalValue = products.reduce((sum, p) => sum + ((p.price || 0) * (p.stockQuantity || 0)), 0);
-
-    if (inventoryStats) {
-      return {
-        ...inventoryStats,
-        inStock,
-        totalValue,
-      };
-    }
-
-    return { totalProducts, activeProducts, inStock, lowStock, outOfStock, totalValue };
-  }, [products, inventoryStats]);
+    return { ...summary, inStock };
+  }, [products, summary]);
 
   const lowStockProducts = useMemo(() =>
     products.filter(p => (p.stockQuantity || 0) <= 5 || p.stock === 'low_stock' || p.stock === 'out_of_stock'),
@@ -133,7 +120,7 @@ const InventoryReport = () => {
     },
   ];
 
-  if ((productsLoading || statsLoading) && products.length === 0) {
+  if (productsLoading && products.length === 0) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>

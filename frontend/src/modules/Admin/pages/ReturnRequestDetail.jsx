@@ -27,6 +27,13 @@ const ReturnRequestDetail = () => {
   const [returnRequest, setReturnRequest] = useState(null);
   const [isEditing, setIsEditing] = useState(false);
   const [status, setStatus] = useState('');
+  const statusTransitions = {
+    pending: ['approved', 'rejected'],
+    approved: ['processing', 'completed'],
+    processing: ['completed'],
+    rejected: [],
+    completed: [],
+  };
 
   useEffect(() => {
     const loadDetail = async () => {
@@ -95,6 +102,12 @@ const ReturnRequestDetail = () => {
     );
   }
 
+  const allowedNextStatuses = statusTransitions[returnRequest.status] || [];
+  const editableStatusOptions = [returnRequest.status, ...allowedNextStatuses].map((value) => ({
+    value,
+    label: value.charAt(0).toUpperCase() + value.slice(1),
+  }));
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -121,13 +134,7 @@ const ReturnRequestDetail = () => {
               <AnimatedSelect
                 value={status}
                 onChange={(e) => setStatus(e.target.value)}
-                options={[
-                  { value: 'pending', label: 'Pending' },
-                  { value: 'approved', label: 'Approved' },
-                  { value: 'processing', label: 'Processing' },
-                  { value: 'completed', label: 'Completed' },
-                  { value: 'rejected', label: 'Rejected' },
-                ]}
+                options={editableStatusOptions}
                 className="min-w-[140px]"
               />
               <button

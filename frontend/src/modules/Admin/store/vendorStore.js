@@ -24,11 +24,22 @@ export const useVendorStore = create((set, get) => ({
   initialize: async () => {
     set({ isLoading: true });
     try {
-      const response = await getAllVendors({ limit: 500 });
-      const payload = response?.data ?? response;
-      const vendors = Array.isArray(payload?.vendors)
-        ? payload.vendors.map(normalizeVendor)
-        : [];
+      const vendors = [];
+      let page = 1;
+      let totalPages = 1;
+
+      do {
+        const response = await getAllVendors({ page, limit: 200 });
+        const payload = response?.data ?? response;
+        const pageVendors = Array.isArray(payload?.vendors)
+          ? payload.vendors.map(normalizeVendor)
+          : [];
+
+        vendors.push(...pageVendors);
+        totalPages = Math.max(Number(payload?.pages) || 1, 1);
+        page += 1;
+      } while (page <= totalPages);
+
       set({ vendors, isLoading: false });
       return vendors;
     } catch {

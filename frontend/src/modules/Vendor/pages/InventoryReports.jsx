@@ -17,6 +17,7 @@ const InventoryReports = () => {
     lowStockItems: 0,
   });
   const [isLoading, setIsLoading] = useState(false);
+  const [lowStockOnly, setLowStockOnly] = useState(false);
 
   const vendorId = vendor?.id || vendor?._id;
 
@@ -35,7 +36,7 @@ const InventoryReports = () => {
     const fetchData = async () => {
       setIsLoading(true);
       try {
-        const res = await getVendorInventoryReport();
+        const res = await getVendorInventoryReport({ lowStockOnly });
         const data = res?.data ?? res;
         setInventoryData(Array.isArray(data?.rows) ? data.rows : []);
         setSummary({
@@ -58,7 +59,7 @@ const InventoryReports = () => {
     };
 
     fetchData();
-  }, [vendorId]);
+  }, [vendorId, lowStockOnly]);
 
   const totalProducts = useMemo(
     () => summary.totalProducts || inventoryData.length,
@@ -144,7 +145,18 @@ const InventoryReports = () => {
       </div>
 
       <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-200">
-        <div className="flex justify-end">
+        <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
+          <button
+            type="button"
+            onClick={() => setLowStockOnly((prev) => !prev)}
+            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors w-full sm:w-auto ${
+              lowStockOnly
+                ? "bg-red-100 text-red-700 border border-red-200"
+                : "bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-200"
+            }`}
+          >
+            {lowStockOnly ? "Showing Low Stock Only" : "Show Low Stock Only"}
+          </button>
           <ExportButton
             data={inventoryData}
             headers={[
@@ -159,11 +171,12 @@ const InventoryReports = () => {
         </div>
       </div>
 
-      <DataTable data={inventoryData} columns={columns} pagination={true} itemsPerPage={10} />
-      {isLoading && (
+      {isLoading ? (
         <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-200">
           <p className="text-gray-500 text-center">Loading inventory report...</p>
         </div>
+      ) : (
+        <DataTable data={inventoryData} columns={columns} pagination={true} itemsPerPage={10} />
       )}
     </motion.div>
   );

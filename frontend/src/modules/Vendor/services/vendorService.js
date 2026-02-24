@@ -123,6 +123,36 @@ export const getVendorOrders = (params = {}) =>
     api.get('/vendor/orders', { params });
 
 /**
+ * Get all vendor orders by paging through the vendor orders endpoint.
+ * Keeps UI accurate for large datasets.
+ * @param {{ limit?: number, status?: string }} params
+ */
+export const getAllVendorOrders = async (params = {}) => {
+    const pageSize = Math.max(Number.parseInt(params.limit, 10) || 100, 1);
+    let page = 1;
+    let pages = 1;
+    let total = 0;
+    const allOrders = [];
+
+    do {
+        const res = await getVendorOrders({ ...params, page, limit: pageSize });
+        const payload = res?.data ?? res;
+        const orders = Array.isArray(payload?.orders) ? payload.orders : [];
+        allOrders.push(...orders);
+        total = Number(payload?.total || allOrders.length);
+        pages = Math.max(Number(payload?.pages || 1), 1);
+        page += 1;
+    } while (page <= pages);
+
+    return {
+        orders: allOrders,
+        total,
+        page: 1,
+        pages,
+    };
+};
+
+/**
  * Get a single order (by orderId or _id) for the authenticated vendor
  * @param {string} id
  */
@@ -147,9 +177,10 @@ export const getVendorCustomers = (params = {}) =>
 /**
  * Get one customer detail for the authenticated vendor
  * @param {string} id
+ * @param {{ page?: number, limit?: number }} params
  */
-export const getVendorCustomerById = (id) =>
-    api.get(`/vendor/customers/${id}`);
+export const getVendorCustomerById = (id, params = {}) =>
+    api.get(`/vendor/customers/${id}`, { params });
 
 /**
  * Get vendor chat threads
@@ -258,9 +289,10 @@ export const getVendorPerformanceMetrics = () =>
 
 /**
  * Get analytics overview for the authenticated vendor
+ * @param {{ period?: 'today'|'week'|'month'|'year' }} params
  */
-export const getVendorAnalyticsOverview = () =>
-    api.get('/vendor/analytics/overview');
+export const getVendorAnalyticsOverview = (params = {}) =>
+    api.get('/vendor/analytics/overview', { params });
 
 /**
  * Get paginated return requests for the authenticated vendor
@@ -268,6 +300,40 @@ export const getVendorAnalyticsOverview = () =>
  */
 export const getVendorReturnRequests = (params = {}) =>
     api.get('/vendor/return-requests', { params });
+
+/**
+ * Get all vendor return requests by paging through the vendor return endpoint.
+ * @param {{ limit?: number, search?: string, status?: string }} params
+ */
+export const getAllVendorReturnRequests = async (params = {}) => {
+    const pageSize = Math.max(Number.parseInt(params.limit, 10) || 100, 1);
+    let page = 1;
+    let pages = 1;
+    let total = 0;
+    const allRequests = [];
+
+    do {
+        const res = await getVendorReturnRequests({ ...params, page, limit: pageSize });
+        const payload = res?.data ?? res;
+        const pageRequests = Array.isArray(payload?.returnRequests) ? payload.returnRequests : [];
+        allRequests.push(...pageRequests);
+
+        const pagination = payload?.pagination || {};
+        total = Number(pagination?.total || allRequests.length);
+        pages = Math.max(Number(pagination?.pages || 1), 1);
+        page += 1;
+    } while (page <= pages);
+
+    return {
+        returnRequests: allRequests,
+        pagination: {
+            total,
+            page: 1,
+            limit: pageSize,
+            pages,
+        },
+    };
+};
 
 /**
  * Get a single return request for the authenticated vendor
@@ -279,7 +345,7 @@ export const getVendorReturnRequestById = (id) =>
 /**
  * Update return request status for the authenticated vendor
  * @param {string} id
- * @param {{ status?: 'pending'|'approved'|'processing'|'rejected'|'completed', refundStatus?: 'pending'|'processed'|'failed' }} payload
+ * @param {{ status?: 'pending'|'approved'|'processing'|'rejected'|'completed', refundStatus?: 'pending'|'processed'|'failed', rejectionReason?: string }} payload
  */
 export const updateVendorReturnRequestStatus = (id, payload) =>
     api.patch(`/vendor/return-requests/${id}/status`, payload);
@@ -290,6 +356,40 @@ export const updateVendorReturnRequestStatus = (id, payload) =>
  */
 export const getVendorReviews = (params = {}) =>
     api.get('/vendor/reviews', { params });
+
+/**
+ * Get all vendor reviews by paging through the vendor reviews endpoint.
+ * @param {{ limit?: number, rating?: number|string, productId?: string }} params
+ */
+export const getAllVendorReviews = async (params = {}) => {
+    const pageSize = Math.max(Number.parseInt(params.limit, 10) || 100, 1);
+    let page = 1;
+    let pages = 1;
+    let total = 0;
+    const allReviews = [];
+
+    do {
+        const res = await getVendorReviews({ ...params, page, limit: pageSize });
+        const payload = res?.data ?? res;
+        const pageReviews = Array.isArray(payload?.reviews) ? payload.reviews : [];
+        allReviews.push(...pageReviews);
+
+        const pagination = payload?.pagination || {};
+        total = Number(pagination?.total || allReviews.length);
+        pages = Math.max(Number(pagination?.pages || 1), 1);
+        page += 1;
+    } while (page <= pages);
+
+    return {
+        reviews: allReviews,
+        pagination: {
+            total,
+            page: 1,
+            limit: pageSize,
+            pages,
+        },
+    };
+};
 
 /**
  * Update vendor review moderation status
@@ -307,34 +407,6 @@ export const updateVendorReviewStatus = (id, status) =>
 export const addVendorReviewResponse = (id, response) =>
     api.patch(`/vendor/reviews/${id}/response`, { response });
 
-/**
- * Get vendor promotions
- * @param {{ search?: string, status?: 'all'|'active'|'inactive'|'expired' }} params
- */
-export const getVendorPromotions = (params = {}) =>
-    api.get('/vendor/promotions', { params });
-
-/**
- * Create a vendor promotion
- * @param {object} payload
- */
-export const createVendorPromotion = (payload) =>
-    api.post('/vendor/promotions', payload);
-
-/**
- * Update a vendor promotion
- * @param {string} id
- * @param {object} payload
- */
-export const updateVendorPromotion = (id, payload) =>
-    api.put(`/vendor/promotions/${id}`, payload);
-
-/**
- * Delete a vendor promotion
- * @param {string} id
- */
-export const deleteVendorPromotion = (id) =>
-    api.delete(`/vendor/promotions/${id}`);
 
 /**
  * Get all shipping zones for authenticated vendor

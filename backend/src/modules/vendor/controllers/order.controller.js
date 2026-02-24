@@ -7,6 +7,22 @@ import Settlement from '../../../models/Settlement.model.js';
 import mongoose from 'mongoose';
 import { createNotification } from '../../../services/notification.service.js';
 
+const deriveTopLevelOrderStatus = (vendorItems = [], fallback = 'pending') => {
+    const statuses = (vendorItems || [])
+        .map((item) => String(item?.status || '').toLowerCase())
+        .filter(Boolean);
+
+    if (!statuses.length) return String(fallback || 'pending').toLowerCase();
+
+    if (statuses.every((s) => s === 'cancelled')) return 'cancelled';
+    if (statuses.every((s) => s === 'delivered')) return 'delivered';
+    if (statuses.includes('shipped')) return 'shipped';
+    if (statuses.includes('processing')) return 'processing';
+    if (statuses.includes('pending')) return 'pending';
+
+    return String(fallback || 'pending').toLowerCase();
+};
+
 // GET /api/vendor/orders
 export const getVendorOrders = asyncHandler(async (req, res) => {
     const { status, page = 1, limit = 20 } = req.query;
@@ -77,6 +93,7 @@ export const updateOrderStatus = asyncHandler(async (req, res) => {
     order.vendorItems = order.vendorItems.map((vi) =>
         vi.vendorId.toString() === req.user.id ? { ...vi.toObject(), status } : vi
     );
+    order.status = deriveTopLevelOrderStatus(order.vendorItems, order.status);
     await order.save();
 
     const notificationTasks = [];
@@ -85,12 +102,13 @@ export const updateOrderStatus = asyncHandler(async (req, res) => {
             createNotification({
                 recipientId: order.userId,
                 recipientType: 'user',
-                title: 'Order status updated',
-                message: `Your order ${order.orderId || order._id} is now ${status}.`,
+                title: 'Order item status updated',
+                message: `An item in your order ${order.orderId || order._id} is now ${status}.`,
                 type: 'order',
                 data: {
                     orderId: String(order.orderId || order._id),
                     status: String(status),
+                    scope: 'vendor_item',
                 },
             })
         );
@@ -117,23 +135,52 @@ export const updateOrderStatus = asyncHandler(async (req, res) => {
 
 // GET /api/vendor/earnings
 export const getEarnings = asyncHandler(async (req, res) => {
-    const commissionDocs = await Commission.find({ vendorId: req.user.id })
+    const {
+        page = 1,
+        limit = 50,
+        settlementsPage = 1,
+        settlementsLimit = 50,
+    } = req.query;
+    const numericPage = Math.max(1, Number(page) || 1);
+    const numericLimit = Math.max(1, Number(limit) || 50);
+    const commissionSkip = (numericPage - 1) * numericLimit;
+    const numericSettlementsPage = Math.max(1, Number(settlementsPage) || 1);
+    const numericSettlementsLimit = Math.max(1, Number(settlementsLimit) || 50);
+    const settlementSkip = (numericSettlementsPage - 1) * numericSettlementsLimit;
+
+    const [commissionDocs, totalCommissions, settlements, totalSettlements] = await Promise.all([
+        Commission.find({ vendorId: req.user.id })
+            .populate('orderId', 'orderId status')
+            .sort({ createdAt: -1 })
+            .skip(commissionSkip)
+            .limit(numericLimit),
+        Commission.countDocuments({ vendorId: req.user.id }),
+        Settlement.find({ vendorId: req.user.id })
+            .sort({ createdAt: -1 })
+            .skip(settlementSkip)
+            .limit(numericSettlementsLimit),
+        Settlement.countDocuments({ vendorId: req.user.id }),
+    ]);
+    const allCommissionsForSummary = await Commission.find({ vendorId: req.user.id })
         .populate('orderId', 'orderId status')
         .sort({ createdAt: -1 });
-    const settlements = await Settlement.find({ vendorId: req.user.id }).sort({ createdAt: -1 });
 
     const commissions = commissionDocs.map((doc) => {
         const commission = doc.toObject();
         const orderRef = commission.orderId?._id || commission.orderId;
         const orderDisplayId = commission.orderId?.orderId || String(orderRef || '');
+        const orderStatus = String(commission.orderId?.status || '').toLowerCase();
+        const effectiveStatus = orderStatus === 'cancelled' ? 'cancelled' : String(commission.status || 'pending');
         return {
             ...commission,
             orderRef,
             orderDisplayId,
+            effectiveStatus,
         };
     });
 
-    const summary = commissions.reduce((acc, c) => {
+    const summary = allCommissionsForSummary.reduce((acc, doc) => {
+        const c = doc.toObject();
         const status = String(c.status || 'pending');
         const orderStatus = String(c.orderId?.status || '').toLowerCase();
         const effectiveStatus = orderStatus === 'cancelled' ? 'cancelled' : status;
@@ -160,5 +207,27 @@ export const getEarnings = asyncHandler(async (req, res) => {
         totalOrders: 0
     });
 
-    res.status(200).json(new ApiResponse(200, { summary, commissions, settlements }, 'Earnings fetched.'));
+    res.status(200).json(
+        new ApiResponse(
+            200,
+            {
+                summary,
+                commissions,
+                settlements,
+                pagination: {
+                    totalCommissions,
+                    page: numericPage,
+                    limit: numericLimit,
+                    pages: Math.max(1, Math.ceil(totalCommissions / numericLimit)),
+                },
+                settlementsPagination: {
+                    totalSettlements,
+                    page: numericSettlementsPage,
+                    limit: numericSettlementsLimit,
+                    pages: Math.max(1, Math.ceil(totalSettlements / numericSettlementsLimit)),
+                },
+            },
+            'Earnings fetched.'
+        )
+    );
 });

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { FiSave, FiTruck, FiMapPin } from 'react-icons/fi';
 import { motion } from 'framer-motion';
 import { useVendorAuthStore } from "../../store/vendorAuthStore";
@@ -6,6 +7,7 @@ import toast from 'react-hot-toast';
 
 const ShippingSettings = () => {
   const { vendor, updateProfile } = useVendorAuthStore();
+  const navigate = useNavigate();
   const [formData, setFormData] = useState({
     shippingEnabled: true,
     freeShippingThreshold: 100,
@@ -259,9 +261,15 @@ const ShippingSettings = () => {
             <div className="space-y-6">
               <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
                 <p className="text-sm text-blue-800">
-                  <strong>Note:</strong> Shipping zones allow you to set different shipping rates for different regions.
-                  This feature will be available in a future update.
+                  <strong>Note:</strong> Shipping zones and per-zone rates are managed from Shipping Management.
                 </p>
+                <button
+                  type="button"
+                  onClick={() => navigate('/vendor/shipping-management')}
+                  className="mt-3 inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-semibold"
+                >
+                  Open Shipping Management
+                </button>
               </div>
             </div>
           )}

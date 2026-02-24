@@ -8,7 +8,7 @@ const StatsCards = ({ stats }) => {
     {
       title: 'Total Revenue',
       value: formatPrice(stats.totalRevenue || 0),
-      change: stats.revenueChange || 0,
+      change: stats.revenueChange,
       icon: IndianRupee,
       color: 'text-white',
       bgColor: 'bg-gradient-to-br from-green-500 to-emerald-600',
@@ -18,7 +18,7 @@ const StatsCards = ({ stats }) => {
     {
       title: 'Total Orders',
       value: (stats.totalOrders || 0).toLocaleString(),
-      change: stats.ordersChange || 0,
+      change: stats.ordersChange,
       icon: FiShoppingBag,
       color: 'text-white',
       bgColor: 'bg-gradient-to-br from-blue-500 to-indigo-600',
@@ -28,7 +28,7 @@ const StatsCards = ({ stats }) => {
     {
       title: 'Total Products',
       value: (stats.totalProducts || 0).toLocaleString(),
-      change: stats.productsChange || 0,
+      change: stats.productsChange,
       icon: FiPackage,
       color: 'text-white',
       bgColor: 'bg-gradient-to-br from-purple-500 to-violet-600',
@@ -38,7 +38,7 @@ const StatsCards = ({ stats }) => {
     {
       title: 'Total Customers',
       value: (stats.totalCustomers || 0).toLocaleString(),
-      change: stats.customersChange || 0,
+      change: stats.customersChange,
       icon: FiUsers,
       color: 'text-white',
       bgColor: 'bg-gradient-to-br from-orange-500 to-amber-600',
@@ -51,7 +51,8 @@ const StatsCards = ({ stats }) => {
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
       {cards.map((card, index) => {
         const Icon = card.icon;
-        const isPositive = card.change >= 0;
+        const hasChange = Number.isFinite(card.change);
+        const isPositive = hasChange ? card.change >= 0 : false;
 
         return (
           <motion.div
@@ -68,13 +69,15 @@ const StatsCards = ({ stats }) => {
               <div className={`${card.bgColor} ${card.iconBg} p-2 sm:p-3 rounded-lg shadow-md`}>
                 <Icon className={`${card.color} text-lg sm:text-xl`} />
               </div>
-              <div
-                className={`text-xs sm:text-sm font-semibold px-2 py-1 rounded-full ${isPositive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                  }`}
-              >
-                {isPositive ? '+' : ''}
-                {card.change}%
-              </div>
+              {hasChange && (
+                <div
+                  className={`text-xs sm:text-sm font-semibold px-2 py-1 rounded-full ${isPositive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                    }`}
+                >
+                  {isPositive ? '+' : ''}
+                  {card.change}%
+                </div>
+              )}
             </div>
             <div className="relative z-10">
               <h3 className="text-gray-600 text-xs sm:text-sm font-medium mb-1">{card.title}</h3>

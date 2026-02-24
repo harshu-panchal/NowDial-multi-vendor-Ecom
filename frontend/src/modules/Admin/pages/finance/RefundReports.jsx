@@ -24,7 +24,7 @@ const RefundReports = () => {
         let page = 1;
         let totalPages = 1;
 
-        while (page <= totalPages && page <= 20) {
+        while (page <= totalPages) {
           const response = await getAllReturnRequests({ page, limit: 200 });
           const payload = response?.data || {};
           allReturns.push(...(payload.returnRequests || []));
@@ -33,11 +33,12 @@ const RefundReports = () => {
         }
 
         const normalizedRefunds = allReturns.map((request) => {
-          const rawStatus = request.refundStatus || request.status || "pending";
+          const requestStatus = request.status || "pending";
+          const refundStatus = request.refundStatus || "pending";
           const status =
-            rawStatus === "processed" || rawStatus === "completed"
+            refundStatus === "processed" || requestStatus === "completed"
               ? "completed"
-              : rawStatus === "failed" || rawStatus === "rejected"
+              : refundStatus === "failed" || requestStatus === "rejected"
                 ? "rejected"
                 : "pending";
 
@@ -47,6 +48,8 @@ const RefundReports = () => {
             customerName: request.customer?.name || "Guest Customer",
             amount: Number(request.refundAmount) || 0,
             reason: request.reason || "N/A",
+            requestStatus,
+            refundStatus,
             status,
             requestedDate: request.requestDate || request.createdAt,
             processedDate:
@@ -119,8 +122,28 @@ const RefundReports = () => {
       ),
     },
     {
+      key: "requestStatus",
+      label: "Return Status",
+      sortable: true,
+      render: (value) => (
+        <Badge variant={value === "completed" ? "success" : value === "rejected" ? "error" : "warning"}>
+          {value}
+        </Badge>
+      ),
+    },
+    {
+      key: "refundStatus",
+      label: "Refund Status",
+      sortable: true,
+      render: (value) => (
+        <Badge variant={value === "processed" ? "success" : value === "failed" ? "error" : "warning"}>
+          {value}
+        </Badge>
+      ),
+    },
+    {
       key: "status",
-      label: "Status",
+      label: "Summary",
       sortable: true,
       render: (value) => (
         <Badge variant={value === "completed" ? "success" : "warning"}>

@@ -140,7 +140,10 @@ export const useVendorAuthStore = create(
           const response = await updateVendorProfile(profileData);
           const data = response?.data ?? response;
           // Merge returned vendor data back into state so UI stays in sync
-          const updatedVendor = data?.vendor ?? { ...get().vendor, ...profileData };
+          const updatedVendor =
+            data && (data._id || data.id)
+              ? data
+              : (data?.vendor ?? { ...get().vendor, ...profileData });
 
           set({
             vendor: updatedVendor,

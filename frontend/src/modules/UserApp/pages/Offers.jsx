@@ -9,10 +9,38 @@ import { getOffers } from '../data/catalogData';
 import { categories } from '../../../data/categories';
 import PageTransition from "../../../shared/components/PageTransition";
 import useInfiniteScroll from "../../../shared/hooks/useInfiniteScroll";
+import api from "../../../shared/utils/api";
+
+const normalizeProduct = (raw) => {
+  const vendorObj =
+    raw?.vendorId && typeof raw.vendorId === "object" ? raw.vendorId : null;
+  const brandObj =
+    raw?.brandId && typeof raw.brandId === "object" ? raw.brandId : null;
+  const categoryObj =
+    raw?.categoryId && typeof raw.categoryId === "object" ? raw.categoryId : null;
+
+  return {
+    ...raw,
+    id: raw?._id || raw?.id,
+    vendorId: vendorObj?._id || raw?.vendorId,
+    brandId: brandObj?._id || raw?.brandId,
+    categoryId: categoryObj?._id || raw?.categoryId,
+    vendorName: raw?.vendorName || vendorObj?.storeName || "",
+    brandName: raw?.brandName || brandObj?.name || "",
+    categoryName: raw?.categoryName || categoryObj?.name || "",
+    image: raw?.image || raw?.images?.[0] || "",
+    images: Array.isArray(raw?.images) ? raw.images : [],
+    price: Number(raw?.price) || 0,
+    originalPrice:
+      raw?.originalPrice !== undefined ? Number(raw.originalPrice) : undefined,
+    rating: Number(raw?.rating) || 0,
+    reviewCount: Number(raw?.reviewCount) || 0,
+  };
+};
 
 const MobileOffers = () => {
   const navigate = useNavigate();
-  const allOffers = getOffers();
+  const [liveOffers, setLiveOffers] = useState([]);
   const [showFilters, setShowFilters] = useState(false);
   const [viewMode, setViewMode] = useState("grid"); // 'grid' or 'list'
   const [filters, setFilters] = useState({
@@ -21,6 +49,72 @@ const MobileOffers = () => {
     maxPrice: "",
     minRating: "",
   });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadLiveOffers = async () => {
+      try {
+        const campaignListResponses = await Promise.allSettled([
+          api.get("/campaigns", { params: { type: "festival", limit: 10 } }),
+          api.get("/campaigns", { params: { type: "special_offer", limit: 10 } }),
+          api.get("/campaigns", { params: { type: "daily_deal", limit: 10 } }),
+          api.get("/campaigns", { params: { type: "flash_sale", limit: 10 } }),
+        ]);
+
+        const campaignSlugs = campaignListResponses
+          .filter((item) => item.status === "fulfilled")
+          .flatMap((item) => {
+            const payload = item.value?.data ?? item.value;
+            return Array.isArray(payload) ? payload : [];
+          })
+          .map((campaign) => String(campaign?.slug || "").trim())
+          .filter(Boolean);
+
+        const uniqueSlugs = [...new Set(campaignSlugs)].slice(0, 20);
+        if (!uniqueSlugs.length) {
+          if (!cancelled) setLiveOffers([]);
+          return;
+        }
+
+        const campaignDetails = await Promise.allSettled(
+          uniqueSlugs.map((slug) => api.get(`/campaigns/${slug}`))
+        );
+
+        const productsById = new Map();
+        campaignDetails
+          .filter((item) => item.status === "fulfilled")
+          .forEach((item) => {
+            const payload = item.value?.data ?? item.value;
+            const products = Array.isArray(payload?.products) ? payload.products : [];
+            products.forEach((product) => {
+              const normalized = normalizeProduct(product);
+              if (!normalized.id) return;
+              if (!productsById.has(normalized.id)) {
+                productsById.set(normalized.id, normalized);
+              }
+            });
+          });
+
+        if (!cancelled) {
+          setLiveOffers(Array.from(productsById.values()));
+        }
+      } catch {
+        if (!cancelled) setLiveOffers([]);
+      }
+    };
+
+    loadLiveOffers();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const allOffers = useMemo(
+    () => (liveOffers.length > 0 ? liveOffers : getOffers()),
+    [liveOffers]
+  );
 
   const offersWithDiscount = useMemo(() => {
     return allOffers.map((product) => {

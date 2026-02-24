@@ -19,8 +19,8 @@ export const getAdminProfile = () =>
 export const getDashboardStats = () =>
     api.get('/admin/analytics/dashboard');
 
-export const getRevenueData = (period = 'monthly') =>
-    api.get('/admin/analytics/revenue', { params: { period } });
+export const getRevenueData = (period = 'monthly', params = {}) =>
+    api.get('/admin/analytics/revenue', { params: { period, ...params } });
 
 export const getOrderStatusBreakdown = () =>
     api.get('/admin/analytics/order-status');
@@ -34,11 +34,11 @@ export const getCustomerGrowth = (period = 'monthly') =>
 export const getRecentOrders = () =>
     api.get('/admin/analytics/recent-orders');
 
-export const getSalesData = (period = 'monthly') =>
-    api.get('/admin/analytics/sales', { params: { period } });
+export const getSalesData = (period = 'monthly', params = {}) =>
+    api.get('/admin/analytics/sales', { params: { period, ...params } });
 
-export const getFinancialSummary = (period = 'monthly') =>
-    api.get('/admin/analytics/finance-summary', { params: { period } });
+export const getFinancialSummary = (period = 'monthly', params = {}) =>
+    api.get('/admin/analytics/finance-summary', { params: { period, ...params } });
 
 export const getInventoryStats = () =>
     api.get('/admin/analytics/inventory-stats');
@@ -75,6 +75,12 @@ export const updateProduct = (id, data) =>
 export const deleteProduct = (id) =>
     api.delete(`/admin/products/${id}`);
 
+export const getTaxPricingRules = () =>
+    api.get('/admin/products/tax-pricing-rules');
+
+export const updateTaxPricingRules = (data) =>
+    api.put('/admin/products/tax-pricing-rules', data);
+
 // ─── Categories ───────────────────────────────────────────────────────────────
 export const getAllCategories = () =>
     api.get('/admin/categories');
@@ -90,6 +96,9 @@ export const updateCategory = (id, data) =>
 
 export const deleteCategory = (id) =>
     api.delete(`/admin/categories/${id}`);
+
+export const reorderCategories = (categoryIds) =>
+    api.patch('/admin/categories/reorder', { categoryIds });
 
 // ─── Brands ───────────────────────────────────────────────────────────────────
 export const getAllBrands = () =>
@@ -120,6 +129,9 @@ export const updateVendorStatus = (id, status, reason = '') =>
 export const updateCommissionRate = (id, commissionRate) =>
     api.patch(`/admin/vendors/${id}/commission`, { commissionRate });
 
+export const getVendorCommissions = (id, params = {}) =>
+    api.get(`/admin/vendors/${id}/commissions`, { params });
+
 // ─── Customers ────────────────────────────────────────────────────────────────
 export const getAllCustomers = (params = {}) =>
     api.get('/admin/customers', { params });
@@ -135,6 +147,15 @@ export const updateCustomerStatus = (id, isActive) =>
 
 export const deleteCustomerAddress = (customerId, addressId) =>
     api.delete(`/admin/customers/${customerId}/addresses/${addressId}`);
+
+export const getCustomerOrders = (id, params = {}) =>
+    api.get(`/admin/customers/${id}/orders`, { params });
+
+export const getCustomerTransactions = (params = {}) =>
+    api.get('/admin/customers/transactions', { params });
+
+export const getCustomerAddresses = (params = {}) =>
+    api.get('/admin/customers/addresses', { params });
 
 // ─── Delivery Boys ────────────────────────────────────────────────────────────
 export const getAllDeliveryBoys = (params = {}) =>
@@ -235,6 +256,7 @@ export const deleteCoupon = (id) => api.delete(`/admin/marketing/coupons/${id}`)
 // Banners
 export const getAllBanners = () => api.get('/admin/marketing/banners');
 export const createBanner = (data) => api.post('/admin/marketing/banners', data);
+export const reorderBanners = (items) => api.patch('/admin/marketing/banners/reorder', { items });
 export const updateBanner = (id, data) => api.put(`/admin/marketing/banners/${id}`, data);
 export const deleteBanner = (id) => api.delete(`/admin/marketing/banners/${id}`);
 

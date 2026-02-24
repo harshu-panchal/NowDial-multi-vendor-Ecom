@@ -5,6 +5,7 @@ import Order from '../../../models/Order.model.js';
 import DeliveryBoy from '../../../models/DeliveryBoy.model.js';
 import User from '../../../models/User.model.js';
 import Commission from '../../../models/Commission.model.js';
+import Product from '../../../models/Product.model.js';
 import { createNotification } from '../../../services/notification.service.js';
 
 // GET /api/admin/orders
@@ -16,6 +17,9 @@ export const getAllOrders = asyncHandler(async (req, res) => {
     const filter = { isDeleted: { $ne: true } };
 
     if (status && status !== 'all') filter.status = status;
+    if (String(req.query.assignableOnly || '') === 'true' && !filter.status) {
+        filter.status = { $in: ['pending', 'processing', 'shipped'] };
+    }
     if (search) {
         const regex = new RegExp(search, 'i');
         const matchedUsers = await User.find({
@@ -40,6 +44,9 @@ export const getAllOrders = asyncHandler(async (req, res) => {
     }
     if (userId) {
         filter.userId = userId;
+    }
+    if (String(req.query.onlyUnassigned || '') === 'true') {
+        filter.deliveryBoyId = null;
     }
 
     const [orders, total] = await Promise.all([
@@ -82,29 +89,89 @@ export const updateOrderStatus = asyncHandler(async (req, res) => {
     const allowed = ['pending', 'processing', 'shipped', 'delivered', 'cancelled', 'returned'];
     if (!allowed.includes(status)) throw new ApiError(400, `Status must be one of: ${allowed.join(', ')}`);
 
-    const update = { status };
-    if (status === 'delivered') {
-        update.deliveredAt = new Date();
-        update.cancelledAt = null;
-    } else if (status === 'cancelled') {
-        update.cancelledAt = new Date();
-    } else {
-        update.deliveredAt = null;
-        update.cancelledAt = null;
-    }
-
-    const order = await Order.findOneAndUpdate(
-        {
-            $or: [{ orderId: req.params.id }, { _id: req.params.id.match(/^[0-9a-fA-F]{24}$/) ? req.params.id : null }],
-            isDeleted: { $ne: true },
-        },
-        update,
-        { new: true }
-    ).populate('userId', 'name email');
+    const order = await Order.findOne({
+        $or: [{ orderId: req.params.id }, { _id: req.params.id.match(/^[0-9a-fA-F]{24}$/) ? req.params.id : null }],
+        isDeleted: { $ne: true },
+    }).populate('userId', 'name email');
 
     if (!order) throw new ApiError(404, 'Order not found.');
 
-    if (status === 'cancelled') {
+    const previousStatus = String(order.status || '').toLowerCase();
+    const nextStatus = String(status || '').toLowerCase();
+
+    const allowedTransitions = {
+        pending: ['processing', 'cancelled'],
+        processing: ['shipped', 'cancelled'],
+        shipped: ['delivered', 'cancelled', 'returned'],
+        delivered: ['returned'],
+        cancelled: [],
+        returned: [],
+    };
+
+    if (previousStatus !== nextStatus) {
+        const nextAllowed = allowedTransitions[previousStatus] || [];
+        if (!nextAllowed.includes(nextStatus)) {
+            throw new ApiError(409, `Cannot move order from ${previousStatus} to ${nextStatus}.`);
+        }
+    }
+
+    order.status = nextStatus;
+    if (nextStatus === 'delivered') {
+        order.deliveredAt = new Date();
+        order.cancelledAt = null;
+    } else if (nextStatus === 'cancelled') {
+        order.cancelledAt = new Date();
+    } else if (nextStatus === 'returned') {
+        order.cancelledAt = null;
+    } else {
+        order.deliveredAt = null;
+        order.cancelledAt = null;
+    }
+
+    if (nextStatus === 'processing') {
+        order.vendorItems = (order.vendorItems || []).map((vi) => {
+            const current = String(vi?.status || 'pending');
+            if (current === 'cancelled' || current === 'delivered') return vi;
+            return { ...vi.toObject(), status: 'processing' };
+        });
+    }
+    if (nextStatus === 'shipped') {
+        order.vendorItems = (order.vendorItems || []).map((vi) => {
+            const current = String(vi?.status || 'pending');
+            if (current === 'cancelled' || current === 'delivered') return vi;
+            return { ...vi.toObject(), status: 'shipped' };
+        });
+    }
+    if (nextStatus === 'delivered') {
+        order.vendorItems = (order.vendorItems || []).map((vi) => {
+            const current = String(vi?.status || 'pending');
+            if (current === 'cancelled') return vi;
+            return { ...vi.toObject(), status: 'delivered' };
+        });
+    }
+    if (nextStatus === 'cancelled') {
+        order.vendorItems = (order.vendorItems || []).map((vi) => {
+            const current = String(vi?.status || 'pending');
+            if (current === 'delivered') return vi;
+            return { ...vi.toObject(), status: 'cancelled' };
+        });
+    }
+
+    if (nextStatus === 'cancelled' && previousStatus !== 'cancelled' && ['pending', 'processing', 'shipped'].includes(previousStatus)) {
+        for (const item of order.items || []) {
+            const product = await Product.findById(item.productId);
+            if (!product) continue;
+            product.stockQuantity += Number(item.quantity || 0);
+            if (product.stockQuantity <= 0) product.stock = 'out_of_stock';
+            else if (product.stockQuantity <= product.lowStockThreshold) product.stock = 'low_stock';
+            else product.stock = 'in_stock';
+            await product.save();
+        }
+    }
+
+    await order.save();
+
+    if (nextStatus === 'cancelled') {
         // Reverse vendor earnings visibility for this order.
         // Keep it idempotent by only updating commissions not already cancelled.
         await Commission.updateMany(
@@ -134,7 +201,7 @@ export const updateOrderStatus = asyncHandler(async (req, res) => {
                 type: 'order',
                 data: {
                     orderId: String(order.orderId),
-                    status: String(status),
+                    status: String(nextStatus),
                 },
             })
         );
@@ -158,7 +225,7 @@ export const updateOrderStatus = asyncHandler(async (req, res) => {
                 type: 'order',
                 data: {
                     orderId: String(order.orderId),
-                    status: String(status),
+                    status: String(nextStatus),
                 },
             })
         );
@@ -174,7 +241,7 @@ export const updateOrderStatus = asyncHandler(async (req, res) => {
                 type: 'order',
                 data: {
                     orderId: String(order.orderId),
-                    status: String(status),
+                    status: String(nextStatus),
                 },
             })
         );

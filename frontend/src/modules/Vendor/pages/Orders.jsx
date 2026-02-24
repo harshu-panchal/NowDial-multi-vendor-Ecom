@@ -12,7 +12,7 @@ import {
 } from 'react-icons/fi';
 import { motion } from 'framer-motion';
 import { useVendorAuthStore } from "../store/vendorAuthStore";
-import { getVendorOrders } from '../services/vendorService';
+import { getAllVendorOrders } from '../services/vendorService';
 
 const Orders = () => {
   const navigate = useNavigate();
@@ -25,11 +25,10 @@ const Orders = () => {
   useEffect(() => {
     if (!vendorId) return;
 
-    const fetchOrders = async () => {
+        const fetchOrders = async () => {
       setIsLoading(true);
       try {
-        const res = await getVendorOrders({ limit: 100 });
-        const data = res?.data ?? res;
+        const data = await getAllVendorOrders({ limit: 100 });
         setOrders(data?.orders ?? []);
       } catch {
         // errors handled by api.js toast

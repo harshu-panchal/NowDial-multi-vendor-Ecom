@@ -20,10 +20,10 @@ export const useAnalyticsStore = create((set, get) => ({
         }
     },
 
-    fetchFinancialSummary: async (period = 'monthly') => {
+    fetchFinancialSummary: async (period = 'monthly', params = {}) => {
         set({ isLoading: true });
         try {
-            const response = await adminService.getFinancialSummary(period);
+            const response = await adminService.getFinancialSummary(period, params);
             set({ financialSummary: response.data, isLoading: false });
         } catch (error) {
             set({ error: error.message, isLoading: false });
@@ -41,10 +41,10 @@ export const useAnalyticsStore = create((set, get) => ({
         }
     },
 
-    fetchRevenueData: async (period = 'monthly') => {
+    fetchRevenueData: async (period = 'monthly', params = {}) => {
         set({ isLoading: true });
         try {
-            const response = await adminService.getRevenueData(period);
+            const response = await adminService.getRevenueData(period, params);
             set({ revenueData: response.data, isLoading: false });
         } catch (error) {
             set({ error: error.message, isLoading: false });

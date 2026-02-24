@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { useNavigate } from "react-router-dom";
+import { matchPath, useNavigate } from "react-router-dom";
 import { FiArrowRight, FiZap, FiTag } from "react-icons/fi";
 
 // Hero images for the parallax effect
@@ -50,11 +50,43 @@ const gradientPalette = [
   "from-green-500 via-teal-500 to-cyan-500",
 ];
 
-const resolveBannerLink = (banner, fallback = "/offers") => {
+const KNOWN_USER_ROUTE_PATTERNS = [
+  "/",
+  "/home",
+  "/search",
+  "/offers",
+  "/daily-deals",
+  "/flash-sale",
+  "/new-arrivals",
+  "/categories",
+  "/category/:id",
+  "/brand/:id",
+  "/seller/:id",
+  "/product/:id",
+  "/sale/:slug",
+  "/track-order/:orderId",
+];
+
+const getPathnameFromTarget = (target) =>
+  String(target || "").trim().split("?")[0].split("#")[0];
+
+const isKnownInternalRoute = (target) => {
+  const pathname = getPathnameFromTarget(target);
+  if (!pathname) return false;
+  return KNOWN_USER_ROUTE_PATTERNS.some((pattern) =>
+    !!matchPath({ path: pattern, end: true }, pathname)
+  );
+};
+
+const resolveBannerLink = (banner) => {
   const candidate = String(
     banner?.linkUrl || banner?.link || banner?.url || ""
   ).trim();
-  return candidate || fallback;
+  if (!candidate) return "";
+  if (isExternalLink(candidate)) return candidate;
+  if (isSafeInternalPath(candidate) && isKnownInternalRoute(candidate))
+    return candidate;
+  return "";
 };
 
 const isExternalLink = (target) => /^https?:\/\//i.test(String(target || "").trim());
@@ -74,7 +106,7 @@ const AnimatedBanner = ({ banners = null }) => {
           description: banner.description || "",
           gradient:
             banner.gradient || gradientPalette[index % gradientPalette.length],
-          link: resolveBannerLink(banner, "/offers"),
+          link: resolveBannerLink(banner),
           icon: banner.icon || FiTag,
           heroImage: banner.image || banner.heroImage || watchImg,
         }))
@@ -87,7 +119,7 @@ const AnimatedBanner = ({ banners = null }) => {
       window.open(normalizedTarget, "_blank", "noopener,noreferrer");
       return;
     }
-    if (isSafeInternalPath(normalizedTarget)) {
+    if (isSafeInternalPath(normalizedTarget) && isKnownInternalRoute(normalizedTarget)) {
       navigate(normalizedTarget);
     }
   };
@@ -196,6 +228,7 @@ const AnimatedBanner = ({ banners = null }) => {
                 <button
                   type="button"
                   onClick={() => handleBannerClick(banner.link)}
+                  disabled={!banner.link}
                   className="relative z-10 h-full flex pt-2 justify-between group">
                   <div className="flex-1">
                     <motion.div
