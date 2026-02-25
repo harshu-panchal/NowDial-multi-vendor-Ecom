@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useDeliveryAuthStore } from '../store/deliveryStore';
@@ -9,7 +9,7 @@ import { formatPrice } from '../../../shared/utils/helpers';
 
 const DeliveryProfile = () => {
   const navigate = useNavigate();
-  const { deliveryBoy, updateProfile, fetchProfile, fetchOrders, isLoading, logout } = useDeliveryAuthStore();
+  const { deliveryBoy, updateProfile, fetchProfile, fetchProfileSummary, isLoading, logout } = useDeliveryAuthStore();
   const [isEditing, setIsEditing] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
   const [profileMetrics, setProfileMetrics] = useState({
@@ -25,48 +25,32 @@ const DeliveryProfile = () => {
     vehicleNumber: deliveryBoy?.vehicleNumber || '',
   });
 
-  useEffect(() => {
-    const loadProfile = async () => {
+  const loadProfile = useCallback(async () => {
+    try {
+      setLoadFailed(false);
+      const profile = await fetchProfile();
       try {
-        setLoadFailed(false);
-        const profile = await fetchProfile();
-
-        try {
-          const orders = await fetchOrders();
-          const today = new Date();
-          const isToday = (dateString) => {
-            const date = new Date(dateString);
-            return (
-              date.getDate() === today.getDate() &&
-              date.getMonth() === today.getMonth() &&
-              date.getFullYear() === today.getFullYear()
-            );
-          };
-
-          const deliveredOrders = orders.filter((order) => order.status === 'completed');
-          const completedToday = deliveredOrders.filter((order) => isToday(order.updatedAt || order.createdAt)).length;
-          const earnings = deliveredOrders.reduce((sum, order) => sum + Number(order.deliveryFee || 0), 0);
-
-          setProfileMetrics({
-            totalDeliveries: deliveredOrders.length,
-            completedToday,
-            earnings,
-          });
-        } catch {
-          // If orders fail to load, keep profile page functional with safe fallback metrics.
-          setProfileMetrics({
-            totalDeliveries: Number(profile?.totalDeliveries || 0),
-            completedToday: 0,
-            earnings: Number(profile?.cashCollected || 0),
-          });
-        }
+        const summary = await fetchProfileSummary();
+        setProfileMetrics({
+          totalDeliveries: Number(summary?.totalDeliveries || 0),
+          completedToday: Number(summary?.completedToday || 0),
+          earnings: Number(summary?.earnings || 0),
+        });
       } catch {
-        setLoadFailed(true);
+        setProfileMetrics({
+          totalDeliveries: Number(profile?.totalDeliveries || 0),
+          completedToday: 0,
+          earnings: 0,
+        });
       }
-    };
+    } catch {
+      setLoadFailed(true);
+    }
+  }, [fetchProfile, fetchProfileSummary]);
 
+  useEffect(() => {
     loadProfile();
-  }, [fetchProfile, fetchOrders]);
+  }, [loadProfile]);
 
   useEffect(() => {
     setFormData({
@@ -148,14 +132,14 @@ const DeliveryProfile = () => {
         >
           <div className="flex items-center justify-between mb-4">
             <h1 className="text-2xl font-bold">My Profile</h1>
-            {loadFailed && (
-              <button
-                onClick={fetchProfile}
-                className="text-xs bg-red-50 text-red-600 px-2 py-1 rounded-lg font-semibold"
-              >
-                Retry
-              </button>
-            )}
+              {loadFailed && (
+                <button
+                  onClick={loadProfile}
+                  className="text-xs bg-red-50 text-red-600 px-2 py-1 rounded-lg font-semibold"
+                >
+                  Retry
+                </button>
+              )}
             {!isEditing ? (
               <button
                 onClick={() => setIsEditing(true)}

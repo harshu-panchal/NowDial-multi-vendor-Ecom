@@ -43,8 +43,12 @@ const sendDeliveryOtpEmail = async (order, otp) => {
 // GET /api/delivery/orders
 export const getAssignedOrders = asyncHandler(async (req, res) => {
     const { status, page, limit } = req.query;
-    const filter = { deliveryBoyId: req.user.id };
-    if (status) filter.status = status;
+    const filter = { deliveryBoyId: req.user.id, isDeleted: { $ne: true } };
+    if (status === 'open') {
+        filter.status = { $in: ['pending', 'processing'] };
+    } else if (status) {
+        filter.status = status;
+    }
 
     const hasPaginationParams = page !== undefined || limit !== undefined;
 
@@ -80,10 +84,126 @@ export const getAssignedOrders = asyncHandler(async (req, res) => {
     );
 });
 
+// GET /api/delivery/orders/dashboard-summary
+export const getDashboardSummary = asyncHandler(async (req, res) => {
+    const deliveryBoyId = req.user.id;
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const [statusStats, completedTodayCount, earningsStats, recentOrders] = await Promise.all([
+        Order.aggregate([
+            { $match: { deliveryBoyId: new mongoose.Types.ObjectId(deliveryBoyId), isDeleted: { $ne: true } } },
+            {
+                $group: {
+                    _id: '$status',
+                    count: { $sum: 1 },
+                },
+            },
+        ]),
+        Order.countDocuments({
+            deliveryBoyId,
+            isDeleted: { $ne: true },
+            status: 'delivered',
+            $or: [
+                { deliveredAt: { $gte: todayStart } },
+                { deliveredAt: { $exists: false }, updatedAt: { $gte: todayStart } },
+                { deliveredAt: null, updatedAt: { $gte: todayStart } },
+            ],
+        }),
+        Order.aggregate([
+            {
+                $match: {
+                    deliveryBoyId: new mongoose.Types.ObjectId(deliveryBoyId),
+                    isDeleted: { $ne: true },
+                    status: 'delivered',
+                },
+            },
+            {
+                $group: {
+                    _id: null,
+                    totalDeliveryFees: { $sum: { $ifNull: ['$shipping', 0] } },
+                },
+            },
+        ]),
+        Order.find({ deliveryBoyId, isDeleted: { $ne: true } }).sort({ createdAt: -1 }).limit(3),
+    ]);
+
+    const countByStatus = statusStats.reduce((acc, row) => {
+        acc[String(row?._id || '')] = Number(row?.count || 0);
+        return acc;
+    }, {});
+
+    const summary = {
+        totalOrders:
+            Number(countByStatus.pending || 0) +
+            Number(countByStatus.processing || 0) +
+            Number(countByStatus.shipped || 0) +
+            Number(countByStatus.delivered || 0) +
+            Number(countByStatus.cancelled || 0) +
+            Number(countByStatus.returned || 0),
+        completedToday: Number(completedTodayCount || 0),
+        openOrders: Number(countByStatus.pending || 0) + Number(countByStatus.processing || 0),
+        earnings: Number(earningsStats?.[0]?.totalDeliveryFees || 0),
+        recentOrders,
+    };
+
+    return res.status(200).json(new ApiResponse(200, summary, 'Dashboard summary fetched.'));
+});
+
+// GET /api/delivery/orders/profile-summary
+export const getProfileSummary = asyncHandler(async (req, res) => {
+    const deliveryBoyId = req.user.id;
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const [deliveredStats, completedTodayCount] = await Promise.all([
+        Order.aggregate([
+            {
+                $match: {
+                    deliveryBoyId: new mongoose.Types.ObjectId(deliveryBoyId),
+                    isDeleted: { $ne: true },
+                    status: 'delivered',
+                },
+            },
+            {
+                $group: {
+                    _id: null,
+                    totalDeliveries: { $sum: 1 },
+                    earnings: { $sum: { $ifNull: ['$shipping', 0] } },
+                },
+            },
+        ]),
+        Order.countDocuments({
+            deliveryBoyId,
+            isDeleted: { $ne: true },
+            status: 'delivered',
+            $or: [
+                { deliveredAt: { $gte: todayStart } },
+                { deliveredAt: { $exists: false }, updatedAt: { $gte: todayStart } },
+                { deliveredAt: null, updatedAt: { $gte: todayStart } },
+            ],
+        }),
+    ]);
+
+    const row = deliveredStats?.[0] || {};
+    return res.status(200).json(
+        new ApiResponse(
+            200,
+            {
+                totalDeliveries: Number(row.totalDeliveries || 0),
+                completedToday: Number(completedTodayCount || 0),
+                earnings: Number(row.earnings || 0),
+            },
+            'Profile summary fetched.'
+        )
+    );
+});
+
 // GET /api/delivery/orders/:id
 export const getOrderDetail = asyncHandler(async (req, res) => {
     const query = {
         deliveryBoyId: req.user.id,
+        isDeleted: { $ne: true },
         $or: [{ orderId: req.params.id }],
     };
     if (mongoose.isValidObjectId(req.params.id)) {
@@ -103,6 +223,7 @@ export const updateDeliveryStatus = asyncHandler(async (req, res) => {
 
     const query = {
         deliveryBoyId: req.user.id,
+        isDeleted: { $ne: true },
         $or: [{ orderId: req.params.id }],
     };
     if (mongoose.isValidObjectId(req.params.id)) {
@@ -250,6 +371,7 @@ export const updateDeliveryStatus = asyncHandler(async (req, res) => {
 export const resendDeliveryOtp = asyncHandler(async (req, res) => {
     const query = {
         deliveryBoyId: req.user.id,
+        isDeleted: { $ne: true },
         $or: [{ orderId: req.params.id }],
     };
 
@@ -303,6 +425,7 @@ export const getDeliveryOtpForDebug = asyncHandler(async (req, res) => {
 
     const query = {
         deliveryBoyId: req.user.id,
+        isDeleted: { $ne: true },
         $or: [{ orderId: req.params.id }],
     };
     if (mongoose.isValidObjectId(req.params.id)) {

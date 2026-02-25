@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { motion } from "framer-motion";
 import { FiBell, FiCheck, FiTrash2, FiInbox, FiRefreshCw } from "react-icons/fi";
+import { useNavigate } from "react-router-dom";
 import PageTransition from "../../../shared/components/PageTransition";
 import { useDeliveryNotificationStore } from "../store/deliveryNotificationStore";
 
@@ -12,6 +13,7 @@ const formatDateTime = (value) => {
 };
 
 const DeliveryNotifications = () => {
+  const navigate = useNavigate();
   const {
     notifications,
     unreadCount,
@@ -27,6 +29,15 @@ const DeliveryNotifications = () => {
   useEffect(() => {
     fetchNotifications(1);
   }, [fetchNotifications]);
+
+  const handleNotificationClick = (notification) => {
+    const data = notification?.data || {};
+    const orderId = String(data?.orderId || "").trim();
+    if (orderId) {
+      navigate(`/delivery/orders/${orderId}`);
+      return;
+    }
+  };
 
   return (
     <PageTransition>
@@ -84,10 +95,13 @@ const DeliveryNotifications = () => {
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: idx * 0.03 }}
+                onClick={() => handleNotificationClick(notification)}
                 className={`rounded-2xl p-4 shadow-sm border ${
                   notification?.isRead
                     ? "bg-white border-gray-200"
                     : "bg-blue-50 border-blue-200"
+                } ${
+                  notification?.data?.orderId ? "cursor-pointer hover:shadow-md transition-shadow" : ""
                 }`}
               >
                 <div className="flex items-start justify-between gap-3">
@@ -150,4 +164,3 @@ const DeliveryNotifications = () => {
 };
 
 export default DeliveryNotifications;
-

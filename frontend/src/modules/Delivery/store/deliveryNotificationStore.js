@@ -42,7 +42,16 @@ export const useDeliveryNotificationStore = create((set, get) => ({
         notifications:
           Number(page) === 1
             ? payload.notifications
-            : [...state.notifications, ...payload.notifications],
+            : (() => {
+                const merged = [...state.notifications, ...payload.notifications];
+                const seen = new Set();
+                return merged.filter((item, index) => {
+                  const key = String(item?._id || `${item?.createdAt || ""}-${index}`);
+                  if (seen.has(key)) return false;
+                  seen.add(key);
+                  return true;
+                });
+              })(),
         unreadCount: Number(payload.unreadCount || 0),
         page: Number(page),
         hasMore: Number(page) < Number(payload.pages || 1),
@@ -51,6 +60,7 @@ export const useDeliveryNotificationStore = create((set, get) => ({
     } catch (error) {
       console.error("Failed to fetch delivery notifications:", error);
       set({ isLoading: false });
+      toast.error("Failed to load notifications");
     }
   },
 
@@ -72,6 +82,7 @@ export const useDeliveryNotificationStore = create((set, get) => ({
       });
     } catch (error) {
       console.error("Failed to mark delivery notification as read:", error);
+      toast.error("Failed to mark notification as read");
     }
   },
 
@@ -123,4 +134,3 @@ export const useDeliveryNotificationStore = create((set, get) => ({
     });
   },
 }));
-

@@ -7,7 +7,7 @@ import Notification from '../../../models/Notification.model.js';
 export const getDeliveryNotifications = asyncHandler(async (req, res) => {
     const { page = 1, limit = 20, type, isRead } = req.query;
     const numericPage = Math.max(1, Number(page) || 1);
-    const numericLimit = Math.max(1, Number(limit) || 20);
+    const numericLimit = Math.min(50, Math.max(1, Number(limit) || 20));
     const skip = (numericPage - 1) * numericLimit;
 
     const filter = {

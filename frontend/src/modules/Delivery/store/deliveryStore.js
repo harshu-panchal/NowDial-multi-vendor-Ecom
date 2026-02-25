@@ -53,6 +53,7 @@ const normalizeOrder = (raw) => {
     orderId: raw?.orderId || raw?._id || raw?.id,
     customer: shippingAddress?.name || guestInfo?.name || 'Customer',
     phone: shippingAddress?.phone || guestInfo?.phone || '',
+    email: shippingAddress?.email || guestInfo?.email || '',
     address: toAddressLine(shippingAddress),
     amount: Number(raw?.total ?? raw?.subtotal ?? 0),
     total: Number(raw?.total ?? raw?.subtotal ?? 0),
@@ -317,6 +318,29 @@ export const useDeliveryAuthStore = create(
           set({ isLoadingOrders: false });
           throw error;
         }
+      },
+
+      fetchDashboardSummary: async () => {
+        const response = await api.get('/delivery/orders/dashboard-summary');
+        const payload = response?.data ?? response ?? {};
+        const recentRaw = Array.isArray(payload?.recentOrders) ? payload.recentOrders : [];
+        return {
+          totalOrders: Number(payload?.totalOrders || 0),
+          completedToday: Number(payload?.completedToday || 0),
+          openOrders: Number(payload?.openOrders || 0),
+          earnings: Number(payload?.earnings || 0),
+          recentOrders: recentRaw.map(normalizeOrder),
+        };
+      },
+
+      fetchProfileSummary: async () => {
+        const response = await api.get('/delivery/orders/profile-summary');
+        const payload = response?.data ?? response ?? {};
+        return {
+          totalDeliveries: Number(payload?.totalDeliveries || 0),
+          completedToday: Number(payload?.completedToday || 0),
+          earnings: Number(payload?.earnings || 0),
+        };
       },
 
       fetchOrderById: async (id) => {

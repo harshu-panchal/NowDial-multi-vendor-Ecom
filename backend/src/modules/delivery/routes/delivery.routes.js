@@ -43,6 +43,8 @@ router.put('/auth/profile', ...deliveryAuth, authController.updateProfile);
 
 // Orders
 router.get('/orders', ...deliveryAuth, orderController.getAssignedOrders);
+router.get('/orders/dashboard-summary', ...deliveryAuth, orderController.getDashboardSummary);
+router.get('/orders/profile-summary', ...deliveryAuth, orderController.getProfileSummary);
 router.get('/orders/:id', ...deliveryAuth, orderController.getOrderDetail);
 if (!IS_PRODUCTION) {
     router.get('/orders/:id/debug-otp', ...deliveryAuth, orderController.getDeliveryOtpForDebug);
