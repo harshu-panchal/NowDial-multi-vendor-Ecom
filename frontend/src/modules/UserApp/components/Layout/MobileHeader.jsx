@@ -339,7 +339,7 @@ const MobileHeader = () => {
                   <img
                     src={appLogo.src}
                     alt={appLogo.alt}
-                    className="h-6 sm:h-8 w-auto object-contain origin-left relative z-[10004]"
+                    className="h-20 sm:h-24 w-auto object-contain origin-left relative z-[10004]"
                     onError={(e) => {
                       // Hide image if logo doesn't exist
                       e.target.style.display = "none";

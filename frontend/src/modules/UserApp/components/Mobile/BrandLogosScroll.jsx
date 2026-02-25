@@ -2,6 +2,8 @@ import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { getCatalogBrands } from '../../data/catalogData';
 
+const placeholderLogo = `data:image/svg+xml;utf8,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80"><rect fill="#f5f5f5" width="120" height="80"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#999" font-size="14" font-family="Arial">Brand</text></svg>')}`;
+
 const BrandLogosScroll = ({ brands = null }) => {
     const navigate = useNavigate();
     const fallbackBrands = getCatalogBrands().slice(0, 10);
@@ -29,11 +31,11 @@ const BrandLogosScroll = ({ brands = null }) => {
                                     onClick={() => navigate(`/brand/${brand.id}`)}
                                     className="bg-gray-50 rounded-lg p-2 shadow-sm transition-all duration-300 flex items-center justify-center w-16 h-16 group cursor-pointer border border-gray-100 mb-2 hover:shadow-md hover:border-gray-200">
                                     <img
-                                        src={brand.logo}
+                                        src={brand.logo || placeholderLogo}
                                         alt={brand.name}
                                         className="w-full h-full object-contain"
                                         onError={(e) => {
-                                            e.target.src = 'https://via.placeholder.com/120x80?text=Brand';
+                                            e.target.src = placeholderLogo;
                                         }}
                                         loading="lazy"
                                     />
@@ -85,11 +87,11 @@ const BrandLogosScroll = ({ brands = null }) => {
                                     onClick={() => navigate(`/brand/${brand.id}`)}
                                     className="bg-white rounded-lg sm:rounded-xl lg:rounded-lg p-1.5 sm:p-2 md:p-2 lg:p-1.5 xl:p-2 shadow-md transition-all duration-300 flex items-center justify-center w-full aspect-square group cursor-pointer border border-gray-100 mb-1.5 lg:mb-1 hover:shadow-lg">
                                     <img
-                                        src={brand.logo}
+                                        src={brand.logo || placeholderLogo}
                                         alt={brand.name}
                                         className="w-[85%] h-[85%] lg:w-[80%] lg:h-[80%] object-contain"
                                         onError={(e) => {
-                                            e.target.src = 'https://via.placeholder.com/120x80?text=Brand';
+                                            e.target.src = placeholderLogo;
                                         }}
                                         loading="lazy"
                                     />
