@@ -5,6 +5,7 @@ import VendorDocument from '../../../models/VendorDocument.model.js';
 import {
     uploadLocalFileToCloudinaryAndCleanupWithType,
     deleteFromCloudinary,
+    cleanupLocalFiles,
 } from '../../../services/upload.service.js';
 import { createNotification } from '../../../services/notification.service.js';
 
@@ -38,40 +39,51 @@ export const createVendorDocument = asyncHandler(async (req, res) => {
         expiryDate = parsed;
     }
 
-    const uploaded = await uploadLocalFileToCloudinaryAndCleanupWithType(
-        req.file.path,
-        'vendors/documents',
-        'auto'
-    );
+    let uploaded = null;
+    try {
+        uploaded = await uploadLocalFileToCloudinaryAndCleanupWithType(
+            req.file.path,
+            'vendors/documents',
+            'auto'
+        );
 
-    const document = await VendorDocument.create({
-        vendorId: req.user.id,
-        name,
-        category,
-        expiryDate,
-        status: 'pending',
-        fileUrl: uploaded.url,
-        filePublicId: uploaded.publicId,
-        fileName: req.file.originalname || name,
-        fileType: req.file.mimetype || 'application/octet-stream',
-        fileSize: req.file.size || 0,
-        uploadedAt: new Date(),
-    });
-
-    await createNotification({
-        recipientId: req.user.id,
-        recipientType: 'vendor',
-        title: 'Document uploaded',
-        message: `${name} uploaded successfully and is pending review.`,
-        type: 'system',
-        data: {
-            documentId: String(document._id),
-            category: String(category),
+        const document = await VendorDocument.create({
+            vendorId: req.user.id,
+            name,
+            category,
+            expiryDate,
             status: 'pending',
-        },
-    });
+            fileUrl: uploaded.url,
+            filePublicId: uploaded.publicId,
+            fileName: req.file.originalname || name,
+            fileType: req.file.mimetype || 'application/octet-stream',
+            fileSize: req.file.size || 0,
+            uploadedAt: new Date(),
+        });
 
-    res.status(201).json(new ApiResponse(201, document, 'Document uploaded.'));
+        await createNotification({
+            recipientId: req.user.id,
+            recipientType: 'vendor',
+            title: 'Document uploaded',
+            message: `${name} uploaded successfully and is pending review.`,
+            type: 'system',
+            data: {
+                documentId: String(document._id),
+                category: String(category),
+                status: 'pending',
+            },
+        });
+
+        res.status(201).json(new ApiResponse(201, document, 'Document uploaded.'));
+    } catch (error) {
+        if (!uploaded) {
+            await cleanupLocalFiles([req.file?.path]);
+        }
+        if (uploaded?.publicId) {
+            await deleteFromCloudinary(uploaded.publicId).catch(() => null);
+        }
+        throw error;
+    }
 });
 
 export const deleteVendorDocument = asyncHandler(async (req, res) => {

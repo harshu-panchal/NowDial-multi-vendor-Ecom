@@ -11,19 +11,34 @@ const DeliveryOrders = () => {
   const navigate = useNavigate();
   const {
     orders,
+    ordersPagination,
     isLoadingOrders,
     isUpdatingOrderStatus,
     fetchOrders,
     acceptOrder,
     completeOrder,
   } = useDeliveryAuthStore();
-  const [filter, setFilter] = useState('all'); // all, pending, in-transit, completed
+  const [filter, setFilter] = useState('all'); // all, pending(open), in-transit, completed
   const [loadFailed, setLoadFailed] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const PAGE_SIZE = 20;
 
-  const loadOrders = async () => {
+  const getBackendStatusFilter = (value) => {
+    if (value === 'all') return undefined;
+    if (value === 'pending') return 'open';
+    if (value === 'in-transit') return 'shipped';
+    if (value === 'completed') return 'delivered';
+    return undefined;
+  };
+
+  const loadOrders = async (page = currentPage, activeFilter = filter) => {
     try {
       setLoadFailed(false);
-      await fetchOrders();
+      await fetchOrders({
+        page,
+        limit: PAGE_SIZE,
+        status: getBackendStatusFilter(activeFilter),
+      });
     } catch {
       setLoadFailed(true);
       // Error toast handled by API interceptor.
@@ -31,13 +46,8 @@ const DeliveryOrders = () => {
   };
 
   useEffect(() => {
-    loadOrders();
-  }, [fetchOrders]);
-
-  const filteredOrders = orders.filter((order) => {
-    if (filter === 'all') return true;
-    return order.status === filter;
-  });
+    loadOrders(currentPage, filter);
+  }, [fetchOrders, currentPage, filter]);
 
   const getStatusColor = (status) => {
     switch (status) {
@@ -79,12 +89,27 @@ const DeliveryOrders = () => {
   };
 
   const handleCompleteOrder = async (orderId) => {
+    const otp = window.prompt('Enter 6-digit delivery OTP shared by customer:');
+    if (otp === null) return;
+    if (!/^\d{6}$/.test(String(otp).trim())) {
+      toast.error('Please enter a valid 6-digit OTP');
+      return;
+    }
+
     try {
-      await completeOrder(orderId);
+      await completeOrder(orderId, String(otp).trim());
       toast.success('Order marked as delivered');
     } catch {
       // Error toast handled by API interceptor.
     }
+  };
+
+  const handlePreviousPage = () => {
+    setCurrentPage((prev) => Math.max(1, prev - 1));
+  };
+
+  const handleNextPage = () => {
+    setCurrentPage((prev) => Math.min(Number(ordersPagination?.pages || 1), prev + 1));
   };
 
   return (
@@ -97,7 +122,9 @@ const DeliveryOrders = () => {
           className="flex items-center justify-between"
         >
           <h1 className="text-2xl font-bold text-gray-800">Orders</h1>
-          <span className="text-sm text-gray-600">{filteredOrders.length} orders</span>
+          <span className="text-sm text-gray-600">
+            {Number(ordersPagination?.total || orders.length)} orders
+          </span>
         </motion.div>
 
         {/* Filter Tabs */}
@@ -110,7 +137,10 @@ const DeliveryOrders = () => {
           {['all', 'pending', 'in-transit', 'completed'].map((tab) => (
             <button
               key={tab}
-              onClick={() => setFilter(tab)}
+              onClick={() => {
+                setFilter(tab);
+                setCurrentPage(1);
+              }}
               className={`px-4 py-2 rounded-full text-sm font-semibold whitespace-nowrap transition-colors ${
                 filter === tab
                   ? 'bg-primary-600 text-white'
@@ -141,13 +171,13 @@ const DeliveryOrders = () => {
               <FiXCircle className="text-red-400 text-5xl mx-auto mb-4" />
               <p className="text-gray-700 mb-3">Could not load orders.</p>
               <button
-                onClick={loadOrders}
+                onClick={() => loadOrders(currentPage, filter)}
                 className="px-4 py-2 rounded-lg bg-primary-600 text-white text-sm font-semibold"
               >
                 Retry
               </button>
             </motion.div>
-          ) : filteredOrders.length === 0 ? (
+          ) : orders.length === 0 ? (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -157,7 +187,7 @@ const DeliveryOrders = () => {
               <p className="text-gray-600">No orders found</p>
             </motion.div>
           ) : (
-            filteredOrders.map((order, index) => (
+            orders.map((order, index) => (
               <motion.div
                 key={order.id}
                 initial={{ opacity: 0, y: 20 }}
@@ -250,6 +280,28 @@ const DeliveryOrders = () => {
             ))
           )}
         </div>
+
+        {!isLoadingOrders && !loadFailed && Number(ordersPagination?.pages || 1) > 1 && (
+          <div className="flex items-center justify-between bg-white rounded-xl border border-gray-200 px-4 py-3">
+            <button
+              onClick={handlePreviousPage}
+              disabled={currentPage <= 1}
+              className="px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Previous
+            </button>
+            <span className="text-sm text-gray-600">
+              Page {currentPage} of {Number(ordersPagination?.pages || 1)}
+            </span>
+            <button
+              onClick={handleNextPage}
+              disabled={currentPage >= Number(ordersPagination?.pages || 1)}
+              className="px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Next
+            </button>
+          </div>
+        )}
       </div>
     </PageTransition>
   );

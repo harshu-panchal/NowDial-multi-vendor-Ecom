@@ -5,6 +5,10 @@ import { motion, AnimatePresence } from "framer-motion";
 import ConfirmModal from "../../components/ConfirmModal";
 import AnimatedSelect from "../../components/AnimatedSelect";
 import { formatPrice } from "../../../../shared/utils/helpers";
+import {
+  getTaxPricingRules,
+  updateTaxPricingRules,
+} from "../../services/adminService";
 import toast from "react-hot-toast";
 
 const TaxPricing = () => {
@@ -61,49 +65,91 @@ const TaxPricing = () => {
     id: null,
     type: null,
   });
+  const [isSaving, setIsSaving] = useState(false);
 
-  const handleSaveTax = (taxData) => {
+  useEffect(() => {
+    const loadRules = async () => {
+      try {
+        const response = await getTaxPricingRules();
+        const payload = response?.data || {};
+        if (Array.isArray(payload.taxRules) && payload.taxRules.length > 0) {
+          setTaxRules(payload.taxRules);
+        }
+        if (Array.isArray(payload.pricingRules) && payload.pricingRules.length > 0) {
+          setPricingRules(payload.pricingRules);
+        }
+      } catch (error) {
+        // interceptor handles toasts
+      }
+    };
+
+    loadRules();
+  }, []);
+
+  const persistRules = async (nextTaxRules, nextPricingRules, successMessage) => {
+    setIsSaving(true);
+    try {
+      await updateTaxPricingRules({
+        taxRules: nextTaxRules,
+        pricingRules: nextPricingRules,
+      });
+      setTaxRules(nextTaxRules);
+      setPricingRules(nextPricingRules);
+      if (successMessage) toast.success(successMessage);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleSaveTax = async (taxData) => {
+    const currentTaxRules = [...taxRules];
+    const currentPricingRules = [...pricingRules];
+    let nextTaxRules = [];
+
     if (editingTax) {
-      setTaxRules(
-        taxRules.map((t) =>
+      nextTaxRules = currentTaxRules.map((t) =>
           t.id === editingTax.id ? { ...taxData, id: editingTax.id } : t
-        )
-      );
-      toast.success("Tax rule updated");
+        );
+      await persistRules(nextTaxRules, currentPricingRules, "Tax rule updated");
     } else {
-      setTaxRules([...taxRules, { ...taxData, id: taxRules.length + 1 }]);
-      toast.success("Tax rule added");
+      nextTaxRules = [...currentTaxRules, { ...taxData, id: currentTaxRules.length + 1 }];
+      await persistRules(nextTaxRules, currentPricingRules, "Tax rule added");
     }
     setEditingTax(null);
   };
 
-  const handleSavePricing = (pricingData) => {
+  const handleSavePricing = async (pricingData) => {
+    const currentTaxRules = [...taxRules];
+    const currentPricingRules = [...pricingRules];
+    let nextPricingRules = [];
+
     if (editingPricing) {
-      setPricingRules(
-        pricingRules.map((p) =>
+      nextPricingRules = currentPricingRules.map((p) =>
           p.id === editingPricing.id
             ? { ...pricingData, id: editingPricing.id }
             : p
-        )
-      );
-      toast.success("Pricing rule updated");
+        );
+      await persistRules(currentTaxRules, nextPricingRules, "Pricing rule updated");
     } else {
-      setPricingRules([
-        ...pricingRules,
-        { ...pricingData, id: pricingRules.length + 1 },
-      ]);
-      toast.success("Pricing rule added");
+      nextPricingRules = [
+        ...currentPricingRules,
+        { ...pricingData, id: currentPricingRules.length + 1 },
+      ];
+      await persistRules(currentTaxRules, nextPricingRules, "Pricing rule added");
     }
     setEditingPricing(null);
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
+    const currentTaxRules = [...taxRules];
+    const currentPricingRules = [...pricingRules];
+
     if (deleteModal.type === "tax") {
-      setTaxRules(taxRules.filter((t) => t.id !== deleteModal.id));
-      toast.success("Tax rule deleted");
+      const nextTaxRules = currentTaxRules.filter((t) => t.id !== deleteModal.id);
+      await persistRules(nextTaxRules, currentPricingRules, "Tax rule deleted");
     } else {
-      setPricingRules(pricingRules.filter((p) => p.id !== deleteModal.id));
-      toast.success("Pricing rule deleted");
+      const nextPricingRules = currentPricingRules.filter((p) => p.id !== deleteModal.id);
+      await persistRules(currentTaxRules, nextPricingRules, "Pricing rule deleted");
     }
     setDeleteModal({ isOpen: false, id: null, type: null });
   };
@@ -129,6 +175,7 @@ const TaxPricing = () => {
             <h2 className="text-lg font-bold text-gray-800">Tax Rules</h2>
             <button
               onClick={() => setEditingTax({})}
+              disabled={isSaving}
               className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors text-sm font-semibold">
               <FiPlus />
               <span>Add Tax Rule</span>
@@ -187,6 +234,7 @@ const TaxPricing = () => {
             <h2 className="text-lg font-bold text-gray-800">Pricing Rules</h2>
             <button
               onClick={() => setEditingPricing({})}
+              disabled={isSaving}
               className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors text-sm font-semibold">
               <FiPlus />
               <span>Add Pricing Rule</span>
@@ -307,16 +355,20 @@ const TaxPricing = () => {
                   {editingTax.id ? "Edit Tax Rule" : "Add Tax Rule"}
                 </h3>
                 <form
-                  onSubmit={(e) => {
+                  onSubmit={async (e) => {
                     e.preventDefault();
                     const formData = new FormData(e.target);
-                    handleSaveTax({
-                      name: formData.get("name"),
-                      rate: parseFloat(formData.get("rate")),
-                      type: formData.get("type"),
-                      applicableTo: formData.get("applicableTo"),
-                      status: formData.get("status"),
-                    });
+                    try {
+                      await handleSaveTax({
+                        name: formData.get("name"),
+                        rate: parseFloat(formData.get("rate")),
+                        type: formData.get("type"),
+                        applicableTo: formData.get("applicableTo"),
+                        status: formData.get("status"),
+                      });
+                    } catch (error) {
+                      // interceptor handles toasts
+                    }
                   }}
                   className="space-y-4">
                   <input
@@ -476,19 +528,23 @@ const TaxPricing = () => {
                   {editingPricing.id ? "Edit Pricing Rule" : "Add Pricing Rule"}
                 </h3>
                 <form
-                  onSubmit={(e) => {
+                  onSubmit={async (e) => {
                     e.preventDefault();
                     const formData = new FormData(e.target);
-                    handleSavePricing({
-                      name: formData.get("name"),
-                      type: formData.get("type"),
-                      value: parseFloat(formData.get("value")),
-                      minQuantity: formData.get("minQuantity")
-                        ? parseInt(formData.get("minQuantity"))
-                        : null,
-                      applicableTo: formData.get("applicableTo") || null,
-                      status: formData.get("status"),
-                    });
+                    try {
+                      await handleSavePricing({
+                        name: formData.get("name"),
+                        type: formData.get("type"),
+                        value: parseFloat(formData.get("value")),
+                        minQuantity: formData.get("minQuantity")
+                          ? parseInt(formData.get("minQuantity"))
+                          : null,
+                        applicableTo: formData.get("applicableTo") || null,
+                        status: formData.get("status"),
+                      });
+                    } catch (error) {
+                      // interceptor handles toasts
+                    }
                   }}
                   className="space-y-4">
                   <input

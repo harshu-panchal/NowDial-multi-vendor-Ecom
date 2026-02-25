@@ -6,18 +6,53 @@ import AnimatedSelect from "../../components/AnimatedSelect";
 import { formatPrice } from '../../../../shared/utils/helpers';
 import { useAnalyticsStore } from "../../../../shared/store/analyticsStore";
 
+const getRangeForPeriod = (period) => {
+  const now = new Date();
+  const endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+  let startDate = new Date(endDate);
+
+  if (period === 'week') {
+    startDate.setDate(endDate.getDate() - 6);
+  } else if (period === 'month') {
+    startDate.setDate(endDate.getDate() - 29);
+  } else {
+    startDate.setFullYear(endDate.getFullYear() - 1);
+    startDate.setDate(endDate.getDate() + 1);
+  }
+
+  return {
+    startDate: startDate.toISOString(),
+    endDate: endDate.toISOString(),
+  };
+};
+
 const RevenueOverview = () => {
   const [period, setPeriod] = useState("month");
-  const { financialSummary, isLoading, fetchFinancialSummary } = useAnalyticsStore();
+  const [isPageLoading, setIsPageLoading] = useState(false);
+  const { financialSummary, fetchFinancialSummary } = useAnalyticsStore();
 
   useEffect(() => {
-    // Map internal selection to period param
     const periodMap = {
       week: 'daily',
       month: 'daily',
       year: 'monthly'
     };
-    fetchFinancialSummary(periodMap[period] || 'monthly');
+    const range = getRangeForPeriod(period);
+    let mounted = true;
+
+    const run = async () => {
+      setIsPageLoading(true);
+      try {
+        await fetchFinancialSummary(periodMap[period] || 'monthly', range);
+      } finally {
+        if (mounted) setIsPageLoading(false);
+      }
+    };
+
+    run();
+    return () => {
+      mounted = false;
+    };
   }, [period, fetchFinancialSummary]);
 
   const chartData = useMemo(() => {
@@ -34,7 +69,7 @@ const RevenueOverview = () => {
     return { revenue, orders, aov };
   }, [financialSummary]);
 
-  if (isLoading && financialSummary.length === 0) {
+  if (isPageLoading && financialSummary.length === 0) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>

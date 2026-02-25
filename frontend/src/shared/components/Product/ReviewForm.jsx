@@ -30,7 +30,7 @@ const ReviewForm = ({ productId, onSubmit }) => {
     setImages(images.filter((_, i) => i !== index));
   };
 
-  const onFormSubmit = (data) => {
+  const onFormSubmit = async (data) => {
     if (rating === 0) {
       toast.error('Please select a rating');
       return;
@@ -45,7 +45,10 @@ const ReviewForm = ({ productId, onSubmit }) => {
     };
 
     if (onSubmit) {
-      onSubmit(reviewData);
+      const result = await onSubmit(reviewData);
+      if (result === false) {
+        return;
+      }
       reset();
       setRating(0);
       setImages([]);

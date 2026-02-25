@@ -14,7 +14,7 @@ const deliveryBoySchema = new mongoose.Schema(
         applicationStatus: {
             type: String,
             enum: ['pending', 'approved', 'rejected'],
-            default: 'approved',
+            default: 'pending',
             index: true,
         },
         rejectionReason: { type: String, trim: true },
@@ -25,6 +25,8 @@ const deliveryBoySchema = new mongoose.Schema(
         resetOtp: { type: String, select: false },
         resetOtpExpiry: { type: Date, select: false },
         resetOtpVerified: { type: Boolean, default: false, select: false },
+        refreshTokenHash: { type: String, select: false },
+        refreshTokenExpiresAt: { type: Date, select: false },
         isActive: { type: Boolean, default: true },
         isAvailable: { type: Boolean, default: true },
         status: {

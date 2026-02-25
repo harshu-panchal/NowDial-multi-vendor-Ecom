@@ -16,15 +16,58 @@ export const useReturnStore = create((set, get) => ({
     fetchReturnRequests: async (params = {}) => {
         set({ isLoading: true });
         try {
-            const response = await adminService.getAllReturnRequests(params);
+            const { fetchAll = true, ...queryParams } = params || {};
+            const pageSize = Math.max(Number.parseInt(queryParams.limit, 10) || 100, 1);
+            let currentPage = Math.max(Number.parseInt(queryParams.page, 10) || 1, 1);
+            let totalPages = 1;
+            let latestPagination = {
+                total: 0,
+                page: currentPage,
+                limit: pageSize,
+                pages: 1,
+            };
+            const allRequests = [];
+
+            do {
+                const response = await adminService.getAllReturnRequests({
+                    ...queryParams,
+                    page: currentPage,
+                    limit: pageSize,
+                });
+
+                const pageRequests = Array.isArray(response?.data?.returnRequests)
+                    ? response.data.returnRequests
+                    : [];
+                allRequests.push(...pageRequests);
+
+                const pagination = response?.data?.pagination || {};
+                latestPagination = {
+                    total: Number.isFinite(Number(pagination.total))
+                        ? Number(pagination.total)
+                        : allRequests.length,
+                    page: Number.isFinite(Number(pagination.page))
+                        ? Number(pagination.page)
+                        : currentPage,
+                    limit: Number.isFinite(Number(pagination.limit))
+                        ? Number(pagination.limit)
+                        : pageSize,
+                    pages: Math.max(Number.parseInt(pagination.pages, 10) || 1, 1),
+                };
+
+                totalPages = fetchAll ? latestPagination.pages : currentPage;
+                currentPage += 1;
+            } while (fetchAll && currentPage <= totalPages);
+
             set({
-                returnRequests: response.data.returnRequests || [],
-                pagination: response.data.pagination || {
-                    total: 0,
-                    page: 1,
-                    limit: 10,
-                    pages: 1,
-                },
+                returnRequests: allRequests,
+                pagination: fetchAll
+                    ? {
+                        total: latestPagination.total,
+                        page: 1,
+                        limit: latestPagination.limit,
+                        pages: latestPagination.pages,
+                    }
+                    : latestPagination,
                 isLoading: false
             });
         } catch (error) {

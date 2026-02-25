@@ -23,6 +23,7 @@ const returnRequestSchema = new mongoose.Schema(
         refundAmount: Number,
         refundStatus: { type: String, enum: ['pending', 'processed', 'failed'] },
         adminNote: String,
+        rejectionReason: String,
         images: [String],
     },
     { timestamps: true }

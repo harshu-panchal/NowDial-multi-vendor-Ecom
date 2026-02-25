@@ -1,6 +1,6 @@
 import { FiHeart, FiShoppingBag, FiStar, FiTrash2 } from "react-icons/fi";
 import { motion } from "framer-motion";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useCartStore, useUIStore } from "../store/useStore";
 import { useWishlistStore } from "../store/wishlistStore";
 import { formatPrice, getPlaceholderImage } from "../utils/helpers";
@@ -10,9 +10,11 @@ import { useState, useRef } from "react";
 import useLongPress from "../../modules/UserApp/hooks/useLongPress";
 import LongPressMenu from "../../modules/UserApp/components/Mobile/LongPressMenu";
 import FlyingItem from "../../modules/UserApp/components/Mobile/FlyingItem";
+import { getVariantSignature } from "../utils/variant";
 
 
 const ProductCard = ({ product, hideRating = false, isFlashSale = false }) => {
+  const navigate = useNavigate();
   const productLink = `/product/${product.id}`;
   const { items, addItem, removeItem } = useCartStore();
   const triggerCartAnimation = useUIStore(
@@ -23,8 +25,11 @@ const ProductCard = ({ product, hideRating = false, isFlashSale = false }) => {
     removeItem: removeFromWishlist,
     isInWishlist,
   } = useWishlistStore();
+  const hasNoVariant = (cartItem) => !getVariantSignature(cartItem?.variant || {});
   const isFavorite = isInWishlist(product.id);
-  const isInCart = items.some((item) => item.id === product.id);
+  const isInCart = items.some(
+    (item) => item.id === product.id && hasNoVariant(item)
+  );
   const [isAdding, setIsAdding] = useState(false);
   const [showLongPressMenu, setShowLongPressMenu] = useState(false);
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
@@ -40,6 +45,17 @@ const ProductCard = ({ product, hideRating = false, isFlashSale = false }) => {
     if (e) {
       e.preventDefault();
       e.stopPropagation();
+    }
+
+    const hasDynamicAxes =
+      Array.isArray(product?.variants?.attributes) &&
+      product.variants.attributes.some((attr) => Array.isArray(attr?.values) && attr.values.length > 0);
+    const hasSizeVariants = Array.isArray(product?.variants?.sizes) && product.variants.sizes.length > 0;
+    const hasColorVariants = Array.isArray(product?.variants?.colors) && product.variants.colors.length > 0;
+    if (hasDynamicAxes || hasSizeVariants || hasColorVariants) {
+      toast.error("Please select variant on product page");
+      navigate(productLink);
+      return;
     }
 
     const isLargeScreen = window.innerWidth >= 1024;
@@ -82,13 +98,17 @@ const ProductCard = ({ product, hideRating = false, isFlashSale = false }) => {
       setTimeout(() => setIsAdding(false), 600);
     }
 
-    addItem({
+    const addedToCart = addItem({
       id: product.id,
       name: product.name,
       price: product.price,
       image: product.image,
       quantity: 1,
+      stockQuantity: product.stockQuantity,
+      vendorId: product.vendorId,
+      vendorName: product.vendorName,
     });
+    if (!addedToCart) return;
     triggerCartAnimation();
     toast.success("Added to cart!");
   };
@@ -98,7 +118,7 @@ const ProductCard = ({ product, hideRating = false, isFlashSale = false }) => {
       e.preventDefault();
       e.stopPropagation();
     }
-    removeItem(product.id);
+    removeItem(product.id, {});
     toast.success("Removed from cart!");
   };
 
@@ -132,13 +152,15 @@ const ProductCard = ({ product, hideRating = false, isFlashSale = false }) => {
       removeFromWishlist(product.id);
       toast.success("Removed from wishlist");
     } else {
-      addToWishlist({
+      const addedToWishlist = addToWishlist({
         id: product.id,
         name: product.name,
         price: product.price,
         image: product.image,
       });
-      toast.success("Added to wishlist");
+      if (addedToWishlist) {
+        toast.success("Added to wishlist");
+      }
     }
   };
 

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import {
   FiMapPin,
   FiCreditCard,
@@ -9,6 +9,7 @@ import {
   FiPlus,
   FiArrowLeft,
   FiShoppingBag,
+  FiTag,
 } from "react-icons/fi";
 import { motion, AnimatePresence } from "framer-motion";
 import { FiLock } from "react-icons/fi";
@@ -39,14 +40,17 @@ const MobileCheckout = () => {
   );
 
   const [step, setStep] = useState(1);
-  const [isGuest, setIsGuest] = useState(false);
   const [selectedAddressId, setSelectedAddressId] = useState(null);
   const [showAddressForm, setShowAddressForm] = useState(false);
   const [couponCode, setCouponCode] = useState("");
+  const [availableCoupons, setAvailableCoupons] = useState([]);
   const [appliedCoupon, setAppliedCoupon] = useState(null);
   const [appliedDiscount, setAppliedDiscount] = useState(0);
   const [isApplyingCoupon, setIsApplyingCoupon] = useState(false);
   const [shippingOption, setShippingOption] = useState("standard");
+  const [estimatedShipping, setEstimatedShipping] = useState(null);
+  const [isEstimatingShipping, setIsEstimatingShipping] = useState(false);
+  const [isPlacingOrder, setIsPlacingOrder] = useState(false);
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -60,13 +64,35 @@ const MobileCheckout = () => {
   });
 
   useEffect(() => {
-    if (isAuthenticated && !isGuest) {
+    if (isAuthenticated) {
       fetchAddresses().catch(() => null);
     }
-  }, [isAuthenticated, isGuest, fetchAddresses]);
+  }, [isAuthenticated, fetchAddresses]);
 
   useEffect(() => {
-    if (isAuthenticated && user && !isGuest) {
+    let cancelled = false;
+    const fetchCoupons = async () => {
+      try {
+        const response = await api.get("/coupons/available");
+        const payload = response?.data ?? response;
+        if (!cancelled) {
+          setAvailableCoupons(Array.isArray(payload) ? payload : []);
+        }
+      } catch {
+        if (!cancelled) {
+          setAvailableCoupons([]);
+        }
+      }
+    };
+
+    fetchCoupons();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isAuthenticated && user) {
       setFormData((prev) => ({
         ...prev,
         name: user.name || "",
@@ -90,9 +116,9 @@ const MobileCheckout = () => {
         }));
       }
     }
-  }, [isAuthenticated, user, isGuest, getDefaultAddress, addresses]);
+  }, [isAuthenticated, user, getDefaultAddress, addresses]);
 
-  const calculateShipping = () => {
+  const calculateShippingFallback = () => {
     const total = getTotal();
     if (appliedCoupon?.type === "freeship") {
       return 0;
@@ -107,7 +133,10 @@ const MobileCheckout = () => {
   };
 
   const total = getTotal();
-  const shipping = calculateShipping();
+  const shipping =
+    typeof estimatedShipping === "number"
+      ? estimatedShipping
+      : calculateShippingFallback();
   const discount = appliedCoupon ? appliedDiscount : 0;
   const taxableAmount = Math.max(0, total - discount);
   const tax = taxableAmount * 0.18;
@@ -120,8 +149,57 @@ const MobileCheckout = () => {
     }
   }, [total, appliedCoupon]);
 
-  const handleApplyCoupon = async () => {
-    const normalizedCode = couponCode.trim().toUpperCase();
+  useEffect(() => {
+    let active = true;
+    const timer = setTimeout(async () => {
+      const validItems = items
+        .map((item) => ({
+          productId: item?.id,
+          quantity: Number(item?.quantity || 1),
+          variant: item?.variant || undefined,
+        }))
+        .filter((item) => item.productId);
+
+      if (!validItems.length) {
+        if (active) setEstimatedShipping(0);
+        return;
+      }
+
+      setIsEstimatingShipping(true);
+      try {
+        const response = await api.post("/shipping/estimate", {
+          items: validItems,
+          shippingAddress: {
+            country: String(formData.country || "").trim(),
+          },
+          shippingOption,
+          couponType: appliedCoupon?.type || null,
+        });
+
+        const payload = response?.data ?? response;
+        const nextShipping = Number(payload?.shipping);
+        if (active) {
+          setEstimatedShipping(Number.isFinite(nextShipping) ? nextShipping : null);
+        }
+      } catch {
+        if (active) {
+          setEstimatedShipping(null);
+        }
+      } finally {
+        if (active) {
+          setIsEstimatingShipping(false);
+        }
+      }
+    }, 250);
+
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [items, formData.country, shippingOption, appliedCoupon?.type]);
+
+  const handleApplyCoupon = async (codeOverride = "") => {
+    const normalizedCode = String(codeOverride || couponCode).trim().toUpperCase();
     if (!normalizedCode) {
       toast.error("Please enter a coupon code");
       return;
@@ -232,10 +310,14 @@ const MobileCheckout = () => {
       toast.error("Please wait for coupon validation to complete.");
       return;
     }
+    if (step === 2 && isPlacingOrder) {
+      return;
+    }
 
     if (step === 1) {
       setStep(2);
     } else if (step === 2) {
+      setIsPlacingOrder(true);
       try {
         const order = await createOrder({
           userId: isAuthenticated ? user?.id : null,
@@ -256,6 +338,8 @@ const MobileCheckout = () => {
         navigate(`/order-confirmation/${order.id}`);
       } catch (error) {
         toast.error(error?.message || "Failed to place order");
+      } finally {
+        setIsPlacingOrder(false);
       }
     }
   };
@@ -280,32 +364,6 @@ const MobileCheckout = () => {
               <MobileCheckoutSteps currentStep={step} totalSteps={2} />
             </div>
           </div>
-
-          {/* Guest Checkout Option */}
-          {!isAuthenticated && !isGuest && (
-            <div className="px-4 py-4 bg-white border-b border-gray-200">
-              <div className="glass-card rounded-xl p-4">
-                <h3 className="text-base font-bold text-gray-800 mb-2">
-                  Have an account?
-                </h3>
-                <p className="text-sm text-gray-600 mb-4">
-                  Sign in for faster checkout
-                </p>
-                <div className="flex gap-3">
-                  <Link
-                    to="/login"
-                    className="flex-1 py-2.5 gradient-green text-white rounded-xl font-semibold text-center hover:shadow-glow-green transition-all">
-                    Sign In
-                  </Link>
-                  <button
-                    onClick={() => setIsGuest(true)}
-                    className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-xl font-semibold hover:bg-gray-200 transition-colors">
-                    Continue as Guest
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
 
           <form onSubmit={handleSubmit} className="lg:px-4 lg:py-6">
             <div className="lg:grid lg:grid-cols-12 lg:gap-8">
@@ -584,6 +642,11 @@ const MobileCheckout = () => {
                             </span>
                           </label>
                         </div>
+                        <p className="text-xs text-gray-500 mt-2">
+                          {isEstimatingShipping
+                            ? "Updating shipping estimate..."
+                            : `Estimated shipping: ${formatPrice(shipping)}`}
+                        </p>
                       </div>
                     )}
 
@@ -593,22 +656,57 @@ const MobileCheckout = () => {
                         Coupon Code
                       </h3>
                       {!appliedCoupon ? (
-                        <div className="flex gap-2">
-                          <input
-                            type="text"
-                            value={couponCode}
-                            onChange={(e) => setCouponCode(e.target.value)}
-                            placeholder="Enter code"
-                            className="flex-1 px-4 py-3 rounded-xl border-2 border-gray-200 focus:outline-none focus:ring-2 focus:ring-primary-500 text-base"
-                          />
-                          <button
-                            type="button"
-                            onClick={handleApplyCoupon}
-                            disabled={isApplyingCoupon}
-                            className="px-4 py-3 gradient-green text-white rounded-xl font-semibold hover:shadow-glow-green transition-all">
-                            {isApplyingCoupon ? "Applying..." : "Apply"}
-                          </button>
-                        </div>
+                        <>
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              value={couponCode}
+                              onChange={(e) => setCouponCode(e.target.value)}
+                              placeholder="Enter code"
+                              className="flex-1 px-4 py-3 rounded-xl border-2 border-gray-200 focus:outline-none focus:ring-2 focus:ring-primary-500 text-base"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleApplyCoupon()}
+                              disabled={isApplyingCoupon}
+                              className="px-4 py-3 gradient-green text-white rounded-xl font-semibold hover:shadow-glow-green transition-all">
+                              {isApplyingCoupon ? "Applying..." : "Apply"}
+                            </button>
+                          </div>
+                          {availableCoupons.length > 0 && (
+                            <div className="mt-3 bg-gray-50 rounded-xl p-3 border border-gray-200">
+                              <h4 className="text-sm font-semibold text-gray-800 mb-2 flex items-center gap-2">
+                                <FiTag className="text-primary-600" />
+                                Available coupons
+                              </h4>
+                              <div className="space-y-2 max-h-40 overflow-y-auto">
+                                {availableCoupons.slice(0, 8).map((coupon) => (
+                                  <button
+                                    key={coupon._id || coupon.code}
+                                    type="button"
+                                    onClick={() => handleApplyCoupon(coupon.code)}
+                                    disabled={isApplyingCoupon}
+                                    className="w-full text-left p-2 bg-white rounded-lg border border-gray-200 hover:border-primary-300 transition-colors"
+                                  >
+                                    <div className="flex items-center justify-between">
+                                      <p className="text-sm font-semibold text-gray-800">{coupon.code}</p>
+                                      <p className="text-xs font-semibold text-primary-700">
+                                        {coupon.type === "percentage"
+                                          ? `${coupon.value}% OFF`
+                                          : coupon.type === "fixed"
+                                            ? `${formatPrice(coupon.value)} OFF`
+                                            : "Free Shipping"}
+                                      </p>
+                                    </div>
+                                    <p className="text-xs text-gray-600">
+                                      Min order: {formatPrice(coupon.minOrderValue || 0)}
+                                    </p>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </>
                       ) : (
                         <div className="flex items-center justify-between p-3 bg-green-50 rounded-xl">
                           <div>
@@ -665,8 +763,9 @@ const MobileCheckout = () => {
                     <div className="p-4 border-t border-gray-100 bg-gray-50">
                       <button
                         type="submit"
+                        disabled={step === 2 && isPlacingOrder}
                         className="w-full gradient-green text-white py-3.5 rounded-xl font-bold text-lg shadow-lg hover:shadow-glow-green transition-all duration-300 transform hover:-translate-y-0.5">
-                        {step === 2 ? "Place Order" : "Continue to Payment"}
+                        {step === 2 ? (isPlacingOrder ? "Placing Order..." : "Place Order") : "Continue to Payment"}
                       </button>
                       {step === 2 && (
                         <button
@@ -701,8 +800,9 @@ const MobileCheckout = () => {
                 )}
                 <button
                   type="submit"
+                  disabled={step === 2 && isPlacingOrder}
                   className="flex-1 gradient-green text-white py-3 rounded-xl font-semibold hover:shadow-glow-green transition-all duration-300">
-                  {step === 2 ? "Place Order" : "Continue"}
+                  {step === 2 ? (isPlacingOrder ? "Placing..." : "Place Order") : "Continue"}
                 </button>
               </div>
             </div>

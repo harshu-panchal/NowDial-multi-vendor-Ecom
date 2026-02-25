@@ -11,7 +11,7 @@ const wishlistSelect = 'name price image stock unit rating originalPrice isActiv
 // GET /api/user/wishlist
 export const getWishlist = asyncHandler(async (req, res) => {
     const wishlist = await Wishlist.findOne({ userId: req.user.id }).populate(wishlistPopulate, wishlistSelect);
-    const items = (wishlist?.items || []).filter((item) => item?.productId);
+    const items = (wishlist?.items || []).filter((item) => item?.productId && item?.productId?.isActive !== false);
     res.status(200).json(new ApiResponse(200, items, 'Wishlist fetched.'));
 });
 

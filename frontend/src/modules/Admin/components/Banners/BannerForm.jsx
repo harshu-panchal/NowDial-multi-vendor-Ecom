@@ -204,8 +204,12 @@ const BannerForm = ({ banner, onClose, onSave }) => {
                       onChange={handleChange}
                       required
                       options={[
+                        { value: "home_slider", label: "Home Slider" },
+                        { value: "festival_offer", label: "Festival Offer Banner" },
+                        { value: "banner", label: "Generic Banner" },
                         { value: "hero", label: "Hero Banner" },
                         { value: "promotional", label: "Promotional Banner" },
+                        { value: "side_banner", label: "Side Banner (Home Right)" },
                       ]}
                     />
                   </div>

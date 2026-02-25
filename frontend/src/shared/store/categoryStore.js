@@ -1,7 +1,14 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { categories as initialCategories } from '../../data/categories';
-import { getAllCategories, getPublicCategories, createCategory, updateCategory, deleteCategory } from '../../modules/Admin/services/adminService';
+import {
+  getAllCategories,
+  getPublicCategories,
+  createCategory,
+  updateCategory,
+  deleteCategory,
+  reorderCategories as reorderCategoriesApi,
+} from '../../modules/Admin/services/adminService';
 import toast from 'react-hot-toast';
 
 export const useCategoryStore = create(
@@ -157,18 +164,15 @@ export const useCategoryStore = create(
 
       // Reorder categories
       reorderCategories: async (categoryIds) => {
-        // This would ideally be a dedicated reorder endpoint
-        // For now, keeping it local as backend doesn't seem to have reorder logic explicitly 
-        // in catalog.controller.js (based on previous review)
         set({ isLoading: true });
         try {
-          const categories = get().categories;
-          const updatedCategories = categories.map((cat) => {
-            const newOrder = categoryIds.indexOf(cat.id);
-            return newOrder !== -1 ? { ...cat, order: newOrder + 1 } : cat;
-          });
-          set({ categories: updatedCategories, isLoading: false });
-          toast.success('Order updated locally');
+          const response = await reorderCategoriesApi(categoryIds);
+          const normalizedCategories = (response.data || []).map((cat) => ({
+            ...cat,
+            id: cat._id,
+          }));
+          set({ categories: normalizedCategories, isLoading: false });
+          toast.success('Category order updated successfully');
           return true;
         } catch (error) {
           set({ isLoading: false });

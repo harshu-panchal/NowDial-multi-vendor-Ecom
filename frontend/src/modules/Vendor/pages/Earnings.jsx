@@ -63,13 +63,23 @@ const Earnings = () => {
 
   const filteredCommissions = useMemo(() => {
     if (selectedStatus === "all") return commissions;
-    return commissions.filter((c) => c.status === selectedStatus);
+    return commissions.filter(
+      (c) => (c.effectiveStatus || c.status) === selectedStatus
+    );
   }, [commissions, selectedStatus]);
 
   if (!vendorId) {
     return (
       <div className="text-center py-12">
         <p className="text-gray-500">Please log in to view earnings</p>
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="text-center py-8">
+        <p className="text-gray-500">Loading earnings data...</p>
       </div>
     );
   }
@@ -278,13 +288,15 @@ const Earnings = () => {
                             </h3>
                             <Badge
                               variant={
-                                commission.status === "paid"
+                                (commission.effectiveStatus || commission.status) ===
+                                "paid"
                                   ? "success"
-                                  : commission.status === "pending"
+                                  : (commission.effectiveStatus ||
+                                      commission.status) === "pending"
                                     ? "warning"
                                     : "error"
                               }>
-                              {commission.status?.toUpperCase()}
+                              {(commission.effectiveStatus || commission.status)?.toUpperCase()}
                             </Badge>
                           </div>
                           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
@@ -400,7 +412,15 @@ const Earnings = () => {
                             <h3 className="font-semibold text-gray-800">
                               {settlement._id || settlement.id}
                             </h3>
-                            <Badge variant="success">PAID</Badge>
+                            <Badge
+                              variant={
+                                settlement.status === "failed"
+                                  ? "error"
+                                  : "success"
+                              }
+                            >
+                              {String(settlement.status || "completed").toUpperCase()}
+                            </Badge>
                           </div>
                           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
                             <div>
@@ -451,11 +471,6 @@ const Earnings = () => {
             </div>
           )}
 
-          {isLoading && (
-            <div className="text-center py-8">
-              <p className="text-gray-500">Loading earnings data...</p>
-            </div>
-          )}
         </div>
       </div>
     </motion.div>

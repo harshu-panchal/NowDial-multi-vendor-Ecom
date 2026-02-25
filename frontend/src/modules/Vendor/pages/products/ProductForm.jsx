@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { FiSave, FiX, FiUpload } from "react-icons/fi";
 import { motion } from "framer-motion";
@@ -10,6 +10,13 @@ import { uploadVendorImage, uploadVendorImages } from "../../services/vendorServ
 import CategorySelector from "../../../Admin/components/CategorySelector";
 import AnimatedSelect from "../../../Admin/components/AnimatedSelect";
 import toast from "react-hot-toast";
+import {
+  parseVariantAxis,
+  buildVariantCombinations,
+  syncVariantPricesWithAxes,
+  buildVariantPayload,
+  normalizeVariantStateForForm,
+} from "../../utils/variantHelpers";
 
 const ProductForm = () => {
   const navigate = useNavigate();
@@ -42,7 +49,7 @@ const ProductForm = () => {
     guaranteePeriod: "",
     hsnCode: "",
     flashSale: false,
-    isNew: false,
+    isNewArrival: false,
     isFeatured: false,
     isVisible: true,
     codAllowed: true,
@@ -55,14 +62,32 @@ const ProductForm = () => {
       sizes: [],
       colors: [],
       materials: [],
+      attributes: [],
       prices: {},
+      stockMap: {},
+      imageMap: {},
       defaultVariant: {},
+      defaultSelection: {},
     },
     seoTitle: "",
     seoDescription: "",
     relatedProducts: [],
+    faqs: [],
   });
   const [isUploadingMedia, setIsUploadingMedia] = useState(false);
+  const [variantAxisInput, setVariantAxisInput] = useState({
+    sizes: "",
+    colors: "",
+  });
+  const variantCombinations = useMemo(
+    () =>
+      buildVariantCombinations(
+        formData.variants?.sizes || [],
+        formData.variants?.colors || [],
+        formData.variants?.attributes || []
+      ),
+    [formData.variants?.sizes, formData.variants?.colors, formData.variants?.attributes]
+  );
 
   const normalizeId = (value) => {
     if (!value) return null;
@@ -110,6 +135,11 @@ const ProductForm = () => {
     const normalizedParentCategoryId = normalizeId(category?.parentId);
     const isSubcategory = Boolean(normalizedParentCategoryId);
 
+    const normalizedVariants = normalizeVariantStateForForm(
+      product.variants || {},
+      product.price
+    );
+
     setFormData({
       name: product.name || "",
       unit: product.unit || "",
@@ -132,7 +162,7 @@ const ProductForm = () => {
       guaranteePeriod: product.guaranteePeriod || "",
       hsnCode: product.hsnCode || "",
       flashSale: product.flashSale || false,
-      isNew: product.isNew || false,
+      isNewArrival: product.isNewArrival || false,
       isFeatured: product.isFeatured || false,
       isVisible: product.isVisible !== undefined ? product.isVisible : true,
       codAllowed: product.codAllowed !== undefined ? product.codAllowed : true,
@@ -141,25 +171,20 @@ const ProductForm = () => {
       taxIncluded: product.taxIncluded || false,
       description: product.description || "",
       tags: product.tags || [],
-      variants: {
-        sizes: product.variants?.sizes || [],
-        colors: product.variants?.colors || [],
-        materials: product.variants?.materials || [],
-        prices: product.variants?.prices || {},
-        defaultVariant: product.variants?.defaultVariant || {},
-      },
+      variants: normalizedVariants,
       seoTitle: product.seoTitle || "",
       seoDescription: product.seoDescription || "",
       relatedProducts: product.relatedProducts || [],
+      faqs: Array.isArray(product.faqs) ? product.faqs : [],
     });
   };
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
-    setFormData({
-      ...formData,
+    setFormData((prev) => ({
+      ...prev,
       [name]: type === "checkbox" ? checked : value,
-    });
+    }));
   };
 
   const handleImageUpload = async (e) => {
@@ -237,6 +262,167 @@ const ProductForm = () => {
     });
   };
 
+  const handleFaqChange = (index, field, value) => {
+    setFormData((prev) => {
+      const nextFaqs = [...(prev.faqs || [])];
+      nextFaqs[index] = {
+        ...(nextFaqs[index] || { question: "", answer: "" }),
+        [field]: value,
+      };
+      return { ...prev, faqs: nextFaqs };
+    });
+  };
+
+  const addFaq = () => {
+    setFormData((prev) => ({
+      ...prev,
+      faqs: [...(prev.faqs || []), { question: "", answer: "" }],
+    }));
+  };
+
+  const removeFaq = (index) => {
+    setFormData((prev) => ({
+      ...prev,
+      faqs: (prev.faqs || []).filter((_, i) => i !== index),
+    }));
+  };
+
+  const updateVariantAxes = (axis, rawText) => {
+    const parsed = parseVariantAxis(rawText);
+    const nextSizes = axis === "sizes" ? parsed : (formData.variants?.sizes || []);
+    const nextColors = axis === "colors" ? parsed : (formData.variants?.colors || []);
+    const synced = syncVariantPricesWithAxes(
+      formData.variants?.prices || {},
+      formData.variants?.stockMap || {},
+      formData.variants?.imageMap || {},
+      nextSizes,
+      nextColors,
+      formData.variants?.attributes || [],
+      formData.price
+    );
+
+    setFormData((prev) => ({
+      ...prev,
+      variants: {
+        ...prev.variants,
+        sizes: nextSizes,
+        colors: nextColors,
+        prices: synced.prices,
+        stockMap: synced.stockMap,
+        imageMap: synced.imageMap,
+        defaultVariant: {
+          size: String(prev.variants?.defaultVariant?.size || ""),
+          color: String(prev.variants?.defaultVariant?.color || ""),
+        },
+      },
+    }));
+  };
+
+  const updateVariantAttributes = (nextAttributes) => {
+    const synced = syncVariantPricesWithAxes(
+      formData.variants?.prices || {},
+      formData.variants?.stockMap || {},
+      formData.variants?.imageMap || {},
+      formData.variants?.sizes || [],
+      formData.variants?.colors || [],
+      nextAttributes,
+      formData.price
+    );
+
+    setFormData((prev) => ({
+      ...prev,
+      variants: {
+        ...prev.variants,
+        attributes: nextAttributes,
+        prices: synced.prices,
+        stockMap: synced.stockMap,
+        imageMap: synced.imageMap,
+      },
+    }));
+  };
+
+  const addAttributeRow = () => {
+    const current = Array.isArray(formData.variants?.attributes) ? formData.variants.attributes : [];
+    updateVariantAttributes([...current, { name: "", values: [] }]);
+  };
+
+  const removeAttributeRow = (index) => {
+    const current = Array.isArray(formData.variants?.attributes) ? formData.variants.attributes : [];
+    updateVariantAttributes(current.filter((_, i) => i !== index));
+  };
+
+  const updateAttributeName = (index, name) => {
+    const current = Array.isArray(formData.variants?.attributes) ? formData.variants.attributes : [];
+    const next = [...current];
+    next[index] = { ...(next[index] || {}), name: String(name || "") };
+    updateVariantAttributes(next);
+  };
+
+  const updateAttributeValues = (index, rawValues) => {
+    const current = Array.isArray(formData.variants?.attributes) ? formData.variants.attributes : [];
+    const next = [...current];
+    const values = parseVariantAxis(rawValues);
+    next[index] = { ...(next[index] || {}), values };
+    updateVariantAttributes(next);
+  };
+
+  const addVariantAxisValues = (axis, rawInput) => {
+    const parsed = parseVariantAxis(rawInput);
+    if (!parsed.length) return;
+    const current = Array.isArray(formData?.variants?.[axis]) ? formData.variants[axis] : [];
+    const merged = parseVariantAxis([...current, ...parsed].join(", "));
+    updateVariantAxes(axis, merged.join(", "));
+    setVariantAxisInput((prev) => ({ ...prev, [axis]: "" }));
+  };
+
+  const removeVariantAxisValue = (axis, valueToRemove) => {
+    const current = Array.isArray(formData?.variants?.[axis]) ? formData.variants[axis] : [];
+    const next = current.filter((value) => String(value) !== String(valueToRemove));
+    updateVariantAxes(axis, next.join(", "));
+  };
+
+  const handleVariantAxisInputKeyDown = (axis, e) => {
+    if (e.key === "Enter" || e.key === ",") {
+      e.preventDefault();
+      addVariantAxisValues(axis, variantAxisInput[axis]);
+    }
+  };
+
+  const handleVariantImageUpload = async (variantKey, file) => {
+    if (!file || !variantKey) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("Please select an image file");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("Image size should be less than 5MB");
+      return;
+    }
+
+    setIsUploadingMedia(true);
+    try {
+      const res = await uploadVendorImage(file, "vendors/products/variants");
+      const uploaded = res?.data ?? res;
+      const imageUrl = uploaded?.url || "";
+      if (!imageUrl) return;
+      setFormData((prev) => ({
+        ...prev,
+        variants: {
+          ...prev.variants,
+          imageMap: {
+            ...(prev.variants?.imageMap || {}),
+            [variantKey]: imageUrl,
+          },
+        },
+      }));
+      toast.success("Variant image uploaded");
+    } catch {
+      // api interceptor handles error toast
+    } finally {
+      setIsUploadingMedia(false);
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
 
@@ -269,6 +455,16 @@ const ProductForm = () => {
       return;
     }
 
+    const hasInvalidFaq = (formData.faqs || []).some((faq) => {
+      const question = String(faq?.question || "").trim();
+      const answer = String(faq?.answer || "").trim();
+      return (question && !answer) || (!question && answer);
+    });
+    if (hasInvalidFaq) {
+      toast.error("Each FAQ must have both question and answer");
+      return;
+    }
+
     const payload = {
       ...formData,
       price: parsedPrice,
@@ -277,8 +473,15 @@ const ProductForm = () => {
       totalAllowedQuantity: parsedTotalAllowedQuantity,
       minimumOrderQuantity: parsedMinimumOrderQuantity,
       categoryId: finalCategoryId,
-      subcategoryId: formData.subcategoryId ?? null,
+      subcategoryId: formData.subcategoryId ? formData.subcategoryId : null,
       brandId: formData.brandId ?? null,
+      faqs: (formData.faqs || [])
+        .map((faq) => ({
+          question: String(faq?.question || "").trim(),
+          answer: String(faq?.answer || "").trim(),
+        }))
+        .filter((faq) => faq.question && faq.answer),
+      variants: buildVariantPayload(formData.variants || {}),
     };
 
     let result;
@@ -593,46 +796,265 @@ const ProductForm = () => {
           <div className="space-y-3">
             <div>
               <label className="block text-xs font-semibold text-gray-700 mb-1">
-                Sizes (comma-separated)
+                Sizes
               </label>
-              <input
-                type="text"
-                value={(formData.variants?.sizes || []).join(", ")}
-                onChange={(e) => {
-                  const sizes = e.target.value
-                    .split(",")
-                    .map((s) => s.trim())
-                    .filter((s) => s);
-                  setFormData({
-                    ...formData,
-                    variants: { ...formData.variants, sizes },
-                  });
-                }}
-                placeholder="S, M, L, XL"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm"
-              />
+              <div className="space-y-2">
+                <div className="flex flex-wrap gap-2">
+                  {(formData.variants?.sizes || []).map((size) => (
+                    <span
+                      key={size}
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-blue-50 text-blue-700 text-xs border border-blue-200"
+                    >
+                      {size}
+                      <button
+                        type="button"
+                        onClick={() => removeVariantAxisValue("sizes", size)}
+                        className="text-blue-700 hover:text-blue-900"
+                      >
+                        <FiX className="w-3 h-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={variantAxisInput.sizes}
+                    onChange={(e) =>
+                      setVariantAxisInput((prev) => ({ ...prev, sizes: e.target.value }))
+                    }
+                    onKeyDown={(e) => handleVariantAxisInputKeyDown("sizes", e)}
+                    onBlur={() => addVariantAxisValues("sizes", variantAxisInput.sizes)}
+                    placeholder="Type size and press Enter (e.g. S, M, L)"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => addVariantAxisValues("sizes", variantAxisInput.sizes)}
+                    className="px-3 py-2 text-xs font-semibold border border-gray-300 rounded-lg hover:bg-gray-50"
+                  >
+                    Add
+                  </button>
+                </div>
+              </div>
             </div>
             <div>
               <label className="block text-xs font-semibold text-gray-700 mb-1">
-                Colors (comma-separated)
+                Colors
               </label>
-              <input
-                type="text"
-                value={(formData.variants?.colors || []).join(", ")}
-                onChange={(e) => {
-                  const colors = e.target.value
-                    .split(",")
-                    .map((c) => c.trim())
-                    .filter((c) => c);
-                  setFormData({
-                    ...formData,
-                    variants: { ...formData.variants, colors },
-                  });
-                }}
-                placeholder="Red, Blue, Green, Black"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm"
-              />
+              <div className="space-y-2">
+                <div className="flex flex-wrap gap-2">
+                  {(formData.variants?.colors || []).map((color) => (
+                    <span
+                      key={color}
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs border border-emerald-200"
+                    >
+                      {color}
+                      <button
+                        type="button"
+                        onClick={() => removeVariantAxisValue("colors", color)}
+                        className="text-emerald-700 hover:text-emerald-900"
+                      >
+                        <FiX className="w-3 h-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={variantAxisInput.colors}
+                    onChange={(e) =>
+                      setVariantAxisInput((prev) => ({ ...prev, colors: e.target.value }))
+                    }
+                    onKeyDown={(e) => handleVariantAxisInputKeyDown("colors", e)}
+                    onBlur={() => addVariantAxisValues("colors", variantAxisInput.colors)}
+                    placeholder="Type color and press Enter (e.g. Red, Blue)"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => addVariantAxisValues("colors", variantAxisInput.colors)}
+                    className="px-3 py-2 text-xs font-semibold border border-gray-300 rounded-lg hover:bg-gray-50"
+                  >
+                    Add
+                  </button>
+                </div>
+              </div>
             </div>
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-semibold text-gray-700">
+                  Dynamic Attributes (optional)
+                </label>
+                <button
+                  type="button"
+                  onClick={addAttributeRow}
+                  className="px-2 py-1 text-xs font-semibold border border-gray-300 rounded-lg hover:bg-gray-50"
+                >
+                  Add Attribute
+                </button>
+              </div>
+              <p className="text-[11px] text-gray-500 mb-2">
+                Example: RAM {"->"} 8GB, 16GB | Storage {"->"} 128GB, 256GB
+              </p>
+              <div className="space-y-2">
+                {(formData.variants?.attributes || []).map((attribute, index) => (
+                  <div key={index} className="grid grid-cols-1 md:grid-cols-12 gap-2 items-center">
+                    <input
+                      type="text"
+                      value={attribute?.name || ""}
+                      onChange={(e) => updateAttributeName(index, e.target.value)}
+                      placeholder="Attribute name"
+                      className="md:col-span-3 w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm"
+                    />
+                    <input
+                      type="text"
+                      value={(attribute?.values || []).join(", ")}
+                      onChange={(e) => updateAttributeValues(index, e.target.value)}
+                      placeholder="Values (comma separated)"
+                      className="md:col-span-8 w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeAttributeRow(index)}
+                      className="md:col-span-1 px-2 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-600"
+                      aria-label="Remove attribute"
+                    >
+                      <FiX className="w-4 h-4 mx-auto" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+            {variantCombinations.length > 0 && (
+              <div className="border border-gray-200 rounded-lg p-3 bg-gray-50">
+                <p className="text-xs font-semibold text-gray-700 mb-2">
+                  Variant Prices
+                </p>
+                <div className="space-y-2">
+                  {variantCombinations.map((combo) => (
+                    <div key={combo.key} className="grid grid-cols-1 md:grid-cols-4 gap-2 items-center">
+                      <p className="text-xs text-gray-700 md:col-span-1">
+                        {combo.label || ((combo.size || "Any Size") + " / " + (combo.color || "Any Color"))}
+                      </p>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={formData.variants?.prices?.[combo.key] ?? ""}
+                        onChange={(e) => {
+                          const nextValue = e.target.value;
+                          setFormData((prev) => ({
+                            ...prev,
+                            variants: {
+                              ...prev.variants,
+                              prices: {
+                                ...(prev.variants?.prices || {}),
+                                [combo.key]: nextValue === "" ? "" : Number(nextValue),
+                              },
+                            },
+                          }));
+                        }}
+                        className="w-full px-2 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 text-xs"
+                        placeholder="Use base price"
+                      />
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={formData.variants?.stockMap?.[combo.key] ?? ""}
+                        onChange={(e) => {
+                          const nextValue = e.target.value;
+                          setFormData((prev) => ({
+                            ...prev,
+                            variants: {
+                              ...prev.variants,
+                              stockMap: {
+                                ...(prev.variants?.stockMap || {}),
+                                [combo.key]: nextValue === "" ? "" : Number(nextValue),
+                              },
+                            },
+                          }));
+                        }}
+                        className="w-full px-2 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 text-xs"
+                        placeholder="Variant stock"
+                      />
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          id={`variant-image-${combo.key}`}
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) handleVariantImageUpload(combo.key, file);
+                            e.target.value = "";
+                          }}
+                        />
+                        <label
+                          htmlFor={`variant-image-${combo.key}`}
+                          className="px-2 py-1.5 border border-gray-300 rounded-lg text-xs cursor-pointer hover:bg-gray-100"
+                        >
+                          Upload
+                        </label>
+                        {formData.variants?.imageMap?.[combo.key] && (
+                          <img
+                            src={formData.variants.imageMap[combo.key]}
+                            alt="Variant"
+                            className="w-8 h-8 rounded object-cover border border-gray-300"
+                          />
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="grid grid-cols-2 gap-2 mt-3">
+                  <select
+                    value={formData.variants?.defaultVariant?.size || ""}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        variants: {
+                          ...prev.variants,
+                          defaultVariant: {
+                            ...(prev.variants?.defaultVariant || {}),
+                            size: e.target.value,
+                          },
+                        },
+                      }))
+                    }
+                    className="w-full px-2 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 text-xs"
+                  >
+                    <option value="">Default size (optional)</option>
+                    {(formData.variants?.sizes || []).map((size) => (
+                      <option key={size} value={size}>{size}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={formData.variants?.defaultVariant?.color || ""}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        variants: {
+                          ...prev.variants,
+                          defaultVariant: {
+                            ...(prev.variants?.defaultVariant || {}),
+                            color: e.target.value,
+                          },
+                        },
+                      }))
+                    }
+                    className="w-full px-2 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 text-xs"
+                  >
+                    <option value="">Default color (optional)</option>
+                    {(formData.variants?.colors || []).map((color) => (
+                      <option key={color} value={color}>{color}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -680,8 +1102,8 @@ const ProductForm = () => {
             <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="checkbox"
-                name="isNew"
-                checked={formData.isNew}
+                name="isNewArrival"
+                checked={formData.isNewArrival}
                 onChange={handleChange}
                 className="w-4 h-4 text-primary-600 rounded focus:ring-primary-500"
               />
@@ -731,6 +1153,53 @@ const ProductForm = () => {
             <FiSave />
             {isUploadingMedia ? "Uploading Media..." : isSaving ? "Saving..." : isEdit ? "Update Product" : "Create Product"}
           </button>
+        </div>
+
+        {/* Product FAQs */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-base font-bold text-gray-800">Product FAQs</h2>
+            <button
+              type="button"
+              onClick={addFaq}
+              className="px-3 py-1.5 text-xs font-semibold bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+            >
+              Add FAQ
+            </button>
+          </div>
+          <div className="space-y-3">
+            {(formData.faqs || []).map((faq, index) => (
+              <div key={index} className="border border-gray-200 rounded-lg p-3 bg-gray-50 space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold text-gray-600">FAQ #{index + 1}</p>
+                  <button
+                    type="button"
+                    onClick={() => removeFaq(index)}
+                    className="text-xs text-red-600 hover:text-red-700"
+                  >
+                    Remove
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  value={faq.question || ""}
+                  onChange={(e) => handleFaqChange(index, "question", e.target.value)}
+                  placeholder="Question"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm bg-white"
+                />
+                <textarea
+                  value={faq.answer || ""}
+                  onChange={(e) => handleFaqChange(index, "answer", e.target.value)}
+                  rows={2}
+                  placeholder="Answer"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm bg-white"
+                />
+              </div>
+            ))}
+            {(formData.faqs || []).length === 0 && (
+              <p className="text-xs text-gray-500">No FAQs added yet.</p>
+            )}
+          </div>
         </div>
       </form>
     </motion.div>

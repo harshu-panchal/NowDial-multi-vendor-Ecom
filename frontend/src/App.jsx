@@ -54,6 +54,7 @@ import CustomerDetailPage from "./modules/Admin/pages/customers/CustomerDetailPa
 // Delivery Management child pages
 import DeliveryBoys from "./modules/Admin/pages/delivery/DeliveryBoys";
 import CashCollection from "./modules/Admin/pages/delivery/CashCollection";
+import AssignDelivery from "./modules/Admin/pages/delivery/AssignDelivery";
 // Vendors child pages
 import Vendors from "./modules/Admin/pages/Vendors";
 import ManageVendors from "./modules/Admin/pages/vendors/ManageVendors";
@@ -116,6 +117,7 @@ import MobileVerification from "./modules/UserApp/pages/Verification";
 import MobileForgotPassword from "./modules/UserApp/pages/ForgotPassword";
 import MobileResetPassword from "./modules/UserApp/pages/ResetPassword";
 import MobileProfile from "./modules/UserApp/pages/Profile";
+import UserNotifications from "./modules/UserApp/pages/Notifications";
 import MobileOrders from "./modules/UserApp/pages/Orders";
 import MobileOrderDetail from "./modules/UserApp/pages/OrderDetail";
 import MobileAddresses from "./modules/UserApp/pages/Addresses";
@@ -124,6 +126,7 @@ import MobileOffers from "./modules/UserApp/pages/Offers";
 import MobileDailyDeals from "./modules/UserApp/pages/DailyDeals";
 import MobileFlashSale from "./modules/UserApp/pages/FlashSale";
 import MobileNewArrivals from "./modules/UserApp/pages/NewArrivals";
+import MobileCampaignSale from "./modules/UserApp/pages/CampaignSale";
 import MobileTrackOrder from "./modules/UserApp/pages/TrackOrder";
 import MobileOrderConfirmation from "./modules/UserApp/pages/OrderConfirmation";
 import ComingSoon from "./modules/UserApp/pages/ComingSoon";
@@ -138,6 +141,7 @@ import DeliveryDashboard from "./modules/Delivery/pages/Dashboard";
 import DeliveryOrders from "./modules/Delivery/pages/Orders";
 import DeliveryOrderDetail from "./modules/Delivery/pages/OrderDetail";
 import DeliveryProfile from "./modules/Delivery/pages/Profile";
+import DeliveryNotifications from "./modules/Delivery/pages/Notifications";
 // Vendor Routes
 import VendorLogin from "./modules/Vendor/pages/Login";
 import VendorRegister from "./modules/Vendor/pages/Register";
@@ -164,7 +168,6 @@ import VendorChat from "./modules/Vendor/pages/Chat";
 import VendorReturnRequests from "./modules/Vendor/pages/ReturnRequests";
 import VendorReturnRequestDetail from "./modules/Vendor/pages/returns/ReturnRequestDetail";
 import VendorProductReviews from "./modules/Vendor/pages/ProductReviews";
-import VendorPromotions from "./modules/Vendor/pages/Promotions";
 import VendorShippingManagement from "./modules/Vendor/pages/ShippingManagement";
 import VendorCustomers from "./modules/Vendor/pages/Customers";
 import VendorCustomerDetail from "./modules/Vendor/pages/CustomerDetail";
@@ -185,7 +188,7 @@ const AppRoutes = () => {
         path="/"
         element={
           <RouteWrapper>
-            <ComingSoon />
+            <MobileHome />
           </RouteWrapper>
         }
       />
@@ -249,7 +252,9 @@ const AppRoutes = () => {
         path="/checkout"
         element={
           <RouteWrapper>
-            <MobileCheckout />
+            <ProtectedRoute>
+              <MobileCheckout />
+            </ProtectedRoute>
           </RouteWrapper>
         }
       />
@@ -298,7 +303,9 @@ const AppRoutes = () => {
         path="/wishlist"
         element={
           <RouteWrapper>
-            <MobileWishlist />
+            <ProtectedRoute>
+              <MobileWishlist />
+            </ProtectedRoute>
           </RouteWrapper>
         }
       />
@@ -335,10 +342,20 @@ const AppRoutes = () => {
         }
       />
       <Route
+        path="/sale/:slug"
+        element={
+          <RouteWrapper>
+            <MobileCampaignSale />
+          </RouteWrapper>
+        }
+      />
+      <Route
         path="/order-confirmation/:orderId"
         element={
           <RouteWrapper>
-            <MobileOrderConfirmation />
+            <ProtectedRoute>
+              <MobileOrderConfirmation />
+            </ProtectedRoute>
           </RouteWrapper>
         }
       />
@@ -346,7 +363,9 @@ const AppRoutes = () => {
         path="/orders/:orderId"
         element={
           <RouteWrapper>
-            <MobileOrderDetail />
+            <ProtectedRoute>
+              <MobileOrderDetail />
+            </ProtectedRoute>
           </RouteWrapper>
         }
       />
@@ -364,6 +383,16 @@ const AppRoutes = () => {
           <RouteWrapper>
             <ProtectedRoute>
               <MobileProfile />
+            </ProtectedRoute>
+          </RouteWrapper>
+        }
+      />
+      <Route
+        path="/notifications"
+        element={
+          <RouteWrapper>
+            <ProtectedRoute>
+              <UserNotifications />
             </ProtectedRoute>
           </RouteWrapper>
         }
@@ -429,6 +458,7 @@ const AppRoutes = () => {
         <Route path="delivery" element={<DeliveryBoys />} />
         <Route path="delivery/delivery-boys" element={<DeliveryBoys />} />
         <Route path="delivery/cash-collection" element={<CashCollection />} />
+        <Route path="delivery/assign-delivery" element={<AssignDelivery />} />
         <Route path="vendors" element={<Vendors />} />
         <Route path="vendors/manage-vendors" element={<ManageVendors />} />
         <Route
@@ -498,8 +528,14 @@ const AppRoutes = () => {
       {/* Delivery Routes */}
       <Route path="/delivery/login" element={<DeliveryLogin />} />
       <Route path="/delivery/register" element={<DeliveryRegister />} />
-      <Route path="/delivery/forgot-password" element={<DeliveryForgotPassword />} />
-      <Route path="/delivery/reset-password" element={<DeliveryResetPassword />} />
+      <Route
+        path="/delivery/forgot-password"
+        element={<DeliveryForgotPassword />}
+      />
+      <Route
+        path="/delivery/reset-password"
+        element={<DeliveryResetPassword />}
+      />
       <Route
         path="/delivery"
         element={
@@ -511,13 +547,17 @@ const AppRoutes = () => {
         <Route path="dashboard" element={<DeliveryDashboard />} />
         <Route path="orders" element={<DeliveryOrders />} />
         <Route path="orders/:id" element={<DeliveryOrderDetail />} />
+        <Route path="notifications" element={<DeliveryNotifications />} />
         <Route path="profile" element={<DeliveryProfile />} />
       </Route>
       {/* Vendor Routes */}
       <Route path="/vendor/login" element={<VendorLogin />} />
       <Route path="/vendor/register" element={<VendorRegister />} />
       <Route path="/vendor/verification" element={<VendorVerification />} />
-      <Route path="/vendor/forgot-password" element={<VendorForgotPassword />} />
+      <Route
+        path="/vendor/forgot-password"
+        element={<VendorForgotPassword />}
+      />
       <Route path="/vendor/reset-password" element={<VendorResetPassword />} />
       <Route
         path="/vendor"
@@ -561,7 +601,6 @@ const AppRoutes = () => {
           element={<VendorReturnRequestDetail />}
         />
         <Route path="product-reviews" element={<VendorProductReviews />} />
-        <Route path="promotions" element={<VendorPromotions />} />
         <Route
           path="shipping-management"
           element={<VendorShippingManagement />}
@@ -585,9 +624,8 @@ const AppRoutes = () => {
         <Route path="settings/shipping-settings" element={<VendorSettings />} />
         <Route path="profile" element={<VendorSettings />} />
       </Route>
-
-
-    </Routes >
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   );
 };
 

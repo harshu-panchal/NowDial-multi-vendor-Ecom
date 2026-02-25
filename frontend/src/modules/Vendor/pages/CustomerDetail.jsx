@@ -24,6 +24,13 @@ const CustomerDetail = () => {
   const [customer, setCustomer] = useState(null);
   const [orders, setOrders] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState({
+    total: 0,
+    page: 1,
+    limit: 10,
+    pages: 1,
+  });
 
   const vendorId = vendor?.id || vendor?._id;
 
@@ -33,7 +40,7 @@ const CustomerDetail = () => {
     const loadCustomer = async () => {
       setIsLoading(true);
       try {
-        const res = await getVendorCustomerById(id);
+        const res = await getVendorCustomerById(id, { page, limit: 10 });
         const data = res?.data ?? res;
         if (!data?.id) {
           toast.error("Customer not found");
@@ -51,6 +58,7 @@ const CustomerDetail = () => {
           lastOrderDate: data.lastOrderDate || null,
         });
         setOrders(Array.isArray(data.orderHistory) ? data.orderHistory : []);
+        setPagination(data?.pagination || { total: 0, page: 1, limit: 10, pages: 1 });
       } catch {
         toast.error("Failed to load customer details");
         navigate("/vendor/customers");
@@ -60,7 +68,7 @@ const CustomerDetail = () => {
     };
 
     loadCustomer();
-  }, [id, vendorId, navigate]);
+  }, [id, vendorId, navigate, page]);
 
   const getStatusBadge = (status) => {
     const normalized = (status || "").toLowerCase();
@@ -269,12 +277,41 @@ const CustomerDetail = () => {
           <h2 className="text-lg font-bold text-gray-800">Order History</h2>
         </div>
         {orders.length > 0 ? (
-          <DataTable
-            data={orders}
-            columns={orderColumns}
-            pagination={true}
-            itemsPerPage={10}
-          />
+          <div className="space-y-4">
+            <DataTable
+              data={orders}
+              columns={orderColumns}
+              pagination={false}
+            />
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-sm text-gray-600">
+              <p>
+                Showing {(pagination.page - 1) * pagination.limit + 1} to{" "}
+                {Math.min(pagination.page * pagination.limit, pagination.total)} of{" "}
+                {pagination.total} orders
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={pagination.page <= 1}
+                  onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+                  className="px-3 py-1.5 rounded-lg border border-gray-200 text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                >
+                  Previous
+                </button>
+                <span>
+                  Page {pagination.page} / {pagination.pages}
+                </span>
+                <button
+                  type="button"
+                  disabled={pagination.page >= pagination.pages}
+                  onClick={() => setPage((prev) => Math.min(pagination.pages, prev + 1))}
+                  className="px-3 py-1.5 rounded-lg border border-gray-200 text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          </div>
         ) : (
           <div className="text-center py-8">
             <p className="text-gray-500">No orders found</p>

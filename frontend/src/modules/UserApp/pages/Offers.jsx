@@ -1,20 +1,59 @@
 import { useState, useMemo, useEffect, useRef } from "react";
-import { FiArrowLeft, FiFilter, FiGrid, FiList, FiX } from "react-icons/fi";
+import { FiArrowLeft, FiFilter, FiGrid, FiList, FiX, FiTag } from "react-icons/fi";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import MobileLayout from "../components/Layout/MobileLayout";
 import ProductCard from "../../../shared/components/ProductCard";
 import ProductListItem from "../components/Mobile/ProductListItem";
-import { getOffers } from '../data/catalogData';
-import { categories } from '../../../data/categories';
+import { categories as fallbackCategories } from "../../../data/categories";
 import PageTransition from "../../../shared/components/PageTransition";
 import useInfiniteScroll from "../../../shared/hooks/useInfiniteScroll";
+import api from "../../../shared/utils/api";
+import { formatPrice } from "../../../shared/utils/helpers";
+import toast from "react-hot-toast";
+import { useCategoryStore } from "../../../shared/store/categoryStore";
+
+const normalizeProduct = (raw) => {
+  const vendorObj =
+    raw?.vendorId && typeof raw.vendorId === "object" ? raw.vendorId : null;
+  const brandObj =
+    raw?.brandId && typeof raw.brandId === "object" ? raw.brandId : null;
+  const categoryObj =
+    raw?.categoryId && typeof raw.categoryId === "object" ? raw.categoryId : null;
+
+  return {
+    ...raw,
+    id: raw?._id || raw?.id,
+    vendorId: vendorObj?._id || raw?.vendorId,
+    brandId: brandObj?._id || raw?.brandId,
+    categoryId: String(categoryObj?._id || raw?.categoryId || ""),
+    vendorName: raw?.vendorName || vendorObj?.storeName || "",
+    brandName: raw?.brandName || brandObj?.name || "",
+    categoryName: raw?.categoryName || categoryObj?.name || "",
+    image: raw?.image || raw?.images?.[0] || "",
+    images: Array.isArray(raw?.images) ? raw.images : [],
+    price: Number(raw?.price) || 0,
+    originalPrice:
+      raw?.originalPrice !== undefined ? Number(raw.originalPrice) : undefined,
+    rating: Number(raw?.rating) || 0,
+    reviewCount: Number(raw?.reviewCount) || 0,
+  };
+};
+
+const getDiscountPercent = (product) => {
+  const original = Number(product?.originalPrice);
+  const current = Number(product?.price);
+  if (!Number.isFinite(original) || !Number.isFinite(current) || original <= current || original <= 0) return 0;
+  return Math.round(((original - current) / original) * 100);
+};
 
 const MobileOffers = () => {
   const navigate = useNavigate();
-  const allOffers = getOffers();
+  const { categories: storeCategories, initialize: initializeCategories } = useCategoryStore();
+  const [liveOffers, setLiveOffers] = useState([]);
+  const [availableCoupons, setAvailableCoupons] = useState([]);
   const [showFilters, setShowFilters] = useState(false);
-  const [viewMode, setViewMode] = useState("grid"); // 'grid' or 'list'
+  const [viewMode, setViewMode] = useState("grid");
   const [filters, setFilters] = useState({
     category: "",
     minPrice: "",
@@ -22,36 +61,106 @@ const MobileOffers = () => {
     minRating: "",
   });
 
+  useEffect(() => {
+    initializeCategories();
+  }, [initializeCategories]);
+
+  const categories = useMemo(() => {
+    const activeStoreCategories = storeCategories.filter((cat) => cat.isActive !== false);
+    if (activeStoreCategories.length) {
+      return activeStoreCategories;
+    }
+    return fallbackCategories;
+  }, [storeCategories]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadLiveOffers = async () => {
+      try {
+        const campaignListResponses = await Promise.allSettled([
+          api.get("/campaigns", { params: { type: "festival", limit: 10 } }),
+          api.get("/campaigns", { params: { type: "special_offer", limit: 10 } }),
+          api.get("/campaigns", { params: { type: "daily_deal", limit: 10 } }),
+          api.get("/campaigns", { params: { type: "flash_sale", limit: 10 } }),
+        ]);
+
+        const campaignSlugs = campaignListResponses
+          .filter((item) => item.status === "fulfilled")
+          .flatMap((item) => {
+            const payload = item.value?.data ?? item.value;
+            return Array.isArray(payload) ? payload : [];
+          })
+          .map((campaign) => String(campaign?.slug || "").trim())
+          .filter(Boolean);
+
+        const uniqueSlugs = [...new Set(campaignSlugs)].slice(0, 20);
+        if (!uniqueSlugs.length) {
+          if (!cancelled) setLiveOffers([]);
+          return;
+        }
+
+        const campaignDetails = await Promise.allSettled(
+          uniqueSlugs.map((slug) => api.get(`/campaigns/${slug}`))
+        );
+
+        const productsById = new Map();
+        campaignDetails
+          .filter((item) => item.status === "fulfilled")
+          .forEach((item) => {
+            const payload = item.value?.data ?? item.value;
+            const products = Array.isArray(payload?.products) ? payload.products : [];
+            products.forEach((product) => {
+              const normalized = normalizeProduct(product);
+              if (!normalized.id) return;
+              if (!productsById.has(normalized.id)) {
+                productsById.set(normalized.id, normalized);
+              }
+            });
+          });
+
+        if (!cancelled) {
+          setLiveOffers(Array.from(productsById.values()));
+        }
+      } catch {
+        if (!cancelled) setLiveOffers([]);
+      }
+    };
+
+    const loadAvailableCoupons = async () => {
+      try {
+        const response = await api.get("/coupons/available");
+        const payload = response?.data ?? response;
+        if (!cancelled) {
+          setAvailableCoupons(Array.isArray(payload) ? payload : []);
+        }
+      } catch {
+        if (!cancelled) setAvailableCoupons([]);
+      }
+    };
+
+    loadLiveOffers();
+    loadAvailableCoupons();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const offersWithDiscount = useMemo(() => {
-    return allOffers.map((product) => {
-      const discount = Math.round(
-        ((product.originalPrice - product.price) / product.originalPrice) * 100
-      );
-      return { ...product, discount };
-    });
-  }, [allOffers]);
+    return liveOffers
+      .map((product) => ({ ...product, discount: getDiscountPercent(product) }))
+      .sort((a, b) => b.discount - a.discount);
+  }, [liveOffers]);
 
   const filteredProducts = useMemo(() => {
     let result = offersWithDiscount;
 
     if (filters.category) {
-      const categoryMap = {
-        '1': ['t-shirt', 'shirt', 'jeans', 'dress', 'gown', 'skirt', 'blazer', 'jacket', 'cardigan', 'sweater', 'flannel', 'maxi'],
-        '2': ['sneakers', 'pumps', 'boots', 'heels', 'shoes'],
-        '3': ['bag', 'crossbody', 'handbag'],
-        '4': ['necklace', 'watch', 'wristwatch'],
-        '5': ['sunglasses', 'belt', 'scarf'],
-        '6': ['athletic', 'running', 'track', 'sporty'],
-      };
-
-      const categoryKeywords = categoryMap[filters.category] || [];
-      result = result.filter((product) =>
-        categoryKeywords.some((keyword) =>
-          product.name.toLowerCase().includes(keyword)
-        )
+      result = result.filter(
+        (product) => String(product.categoryId || "") === String(filters.category)
       );
     }
-
     if (filters.minPrice) {
       result = result.filter(
         (product) => product.price >= parseFloat(filters.minPrice)
@@ -67,8 +176,6 @@ const MobileOffers = () => {
         (product) => product.rating >= parseFloat(filters.minRating)
       );
     }
-
-    result.sort((a, b) => b.discount - a.discount);
     return result;
   }, [offersWithDiscount, filters]);
 
@@ -90,11 +197,9 @@ const MobileOffers = () => {
     });
   };
 
-  // Check if any filter is active
   const hasActiveFilters =
     filters.minPrice || filters.maxPrice || filters.minRating || filters.category;
 
-  // Close filter dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (
@@ -116,11 +221,19 @@ const MobileOffers = () => {
     };
   }, [showFilters]);
 
+  const copyCoupon = async (code) => {
+    try {
+      await navigator.clipboard.writeText(code);
+      toast.success(`Coupon ${code} copied`);
+    } catch {
+      toast.success(`Coupon: ${code}`);
+    }
+  };
+
   return (
     <PageTransition>
       <MobileLayout showBottomNav={true} showCartBar={true}>
         <div className="w-full pb-24">
-          {/* Header */}
           <div className="mx-2 mt-2 px-4 py-6 bg-gradient-to-r from-red-50 to-orange-50 border border-gray-100 rounded-2xl sticky top-2 z-30 shadow-md">
             <div className="flex items-center gap-3 mb-3">
               <button
@@ -133,12 +246,10 @@ const MobileOffers = () => {
                   Special Offers
                 </h1>
                 <p className="text-sm font-medium text-red-600">
-                  {filteredProducts.length}{" "}
-                  {filteredProducts.length === 1 ? "offer" : "offers"} live now • Extra savings
+                  {filteredProducts.length} {filteredProducts.length === 1 ? "offer" : "offers"} live now • Extra savings
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                {/* View Toggle Buttons */}
                 <div className="flex items-center bg-gray-100 rounded-lg p-1">
                   <button
                     onClick={() => setViewMode("list")}
@@ -170,11 +281,9 @@ const MobileOffers = () => {
                     />
                   </button>
 
-                  {/* Filter Dropdown */}
                   <AnimatePresence>
                     {showFilters && (
                       <>
-                        {/* Backdrop */}
                         <motion.div
                           initial={{ opacity: 0 }}
                           animate={{ opacity: 1 }}
@@ -193,7 +302,6 @@ const MobileOffers = () => {
                           }}
                           className="filter-dropdown absolute right-0 top-full w-56 bg-white rounded-xl shadow-2xl border border-gray-200 z-[10001] overflow-hidden"
                           style={{ marginTop: "-50px" }}>
-                          {/* Header */}
                           <div className="flex items-center justify-between px-2 py-1.5 border-b border-gray-200 bg-gray-50">
                             <div className="flex items-center gap-1.5">
                               <FiFilter className="text-sm text-gray-700" />
@@ -208,10 +316,8 @@ const MobileOffers = () => {
                             </button>
                           </div>
 
-                          {/* Filter Content */}
                           <div className="max-h-[50vh] overflow-y-auto scrollbar-hide">
                             <div className="p-2 space-y-2">
-                              {/* Category Filter */}
                               <div>
                                 <h4 className="font-semibold text-gray-700 mb-1 text-xs">
                                   Category
@@ -225,14 +331,13 @@ const MobileOffers = () => {
                                 >
                                   <option value="">All Categories</option>
                                   {categories.map((cat) => (
-                                    <option key={cat.id} value={cat.id}>
+                                    <option key={cat.id} value={String(cat.id)}>
                                       {cat.name}
                                     </option>
                                   ))}
                                 </select>
                               </div>
 
-                              {/* Price Range */}
                               <div>
                                 <h4 className="font-semibold text-gray-700 mb-1 text-xs">
                                   Price Range
@@ -259,7 +364,6 @@ const MobileOffers = () => {
                                 </div>
                               </div>
 
-                              {/* Rating Filter */}
                               <div>
                                 <h4 className="font-semibold text-gray-700 mb-1 text-xs">
                                   Minimum Rating
@@ -273,14 +377,9 @@ const MobileOffers = () => {
                                         type="radio"
                                         name="minRating"
                                         value={rating}
-                                        checked={
-                                          filters.minRating === rating.toString()
-                                        }
+                                        checked={filters.minRating === rating.toString()}
                                         onChange={(e) =>
-                                          handleFilterChange(
-                                            "minRating",
-                                            e.target.value
-                                          )
+                                          handleFilterChange("minRating", e.target.value)
                                         }
                                         className="w-3 h-3 appearance-none rounded-full border-2 border-gray-300 bg-white checked:bg-white checked:border-red-500 relative cursor-pointer"
                                         style={{
@@ -300,7 +399,6 @@ const MobileOffers = () => {
                             </div>
                           </div>
 
-                          {/* Footer */}
                           <div className="border-t border-gray-200 p-2 bg-gray-50 space-y-1.5">
                             <button
                               onClick={clearFilters}
@@ -322,11 +420,44 @@ const MobileOffers = () => {
             </div>
           </div>
 
-          {/* Products List */}
+          {availableCoupons.length > 0 && (
+            <div className="px-4 pt-4">
+              <div className="bg-white border border-gray-200 rounded-xl p-3">
+                <h3 className="text-sm font-bold text-gray-800 mb-2 flex items-center gap-2">
+                  <FiTag className="text-red-600" />
+                  Available Coupons
+                </h3>
+                <div className="space-y-2">
+                  {availableCoupons.slice(0, 4).map((coupon) => (
+                    <button
+                      key={coupon._id || coupon.code}
+                      onClick={() => copyCoupon(coupon.code)}
+                      className="w-full text-left p-2 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors"
+                    >
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-semibold text-gray-800">{coupon.code}</p>
+                        <p className="text-xs text-red-600 font-semibold">
+                          {coupon.type === "percentage"
+                            ? `${coupon.value}% OFF`
+                            : coupon.type === "fixed"
+                              ? `${formatPrice(coupon.value)} OFF`
+                              : "Free Shipping"}
+                        </p>
+                      </div>
+                      <p className="text-xs text-gray-600">
+                        Min order: {formatPrice(coupon.minOrderValue || 0)}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="px-4 py-4">
             {filteredProducts.length === 0 ? (
               <div className="text-center py-12">
-                <div className="text-6xl text-gray-300 mx-auto mb-4">🎁</div>
+                <div className="text-6xl text-gray-300 mx-auto mb-4">[ ]</div>
                 <h3 className="text-xl font-bold text-gray-800 mb-2">
                   No offers found
                 </h3>
@@ -370,22 +501,7 @@ const MobileOffers = () => {
                       onClick={loadMore}
                       disabled={isLoading}
                       className="px-6 py-3 gradient-red text-white rounded-xl font-semibold hover:shadow-glow-red transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed">
-                      {isLoading ? (
-                        <span className="flex items-center gap-2">
-                          <motion.div
-                            animate={{ rotate: 360 }}
-                            transition={{
-                              duration: 1,
-                              repeat: Infinity,
-                              ease: "linear",
-                            }}
-                            className="w-4 h-4 border-2 border-white border-t-transparent rounded-full"
-                          />
-                          Loading...
-                        </span>
-                      ) : (
-                        "Load More"
-                      )}
+                      {isLoading ? "Loading..." : "Load More"}
                     </button>
                   </div>
                 )}
@@ -427,22 +543,7 @@ const MobileOffers = () => {
                       onClick={loadMore}
                       disabled={isLoading}
                       className="px-6 py-3 gradient-red text-white rounded-xl font-semibold hover:shadow-glow-red transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed">
-                      {isLoading ? (
-                        <span className="flex items-center gap-2">
-                          <motion.div
-                            animate={{ rotate: 360 }}
-                            transition={{
-                              duration: 1,
-                              repeat: Infinity,
-                              ease: "linear",
-                            }}
-                            className="w-4 h-4 border-2 border-white border-t-transparent rounded-full"
-                          />
-                          Loading...
-                        </span>
-                      ) : (
-                        "Load More"
-                      )}
+                      {isLoading ? "Loading..." : "Load More"}
                     </button>
                   </div>
                 )}

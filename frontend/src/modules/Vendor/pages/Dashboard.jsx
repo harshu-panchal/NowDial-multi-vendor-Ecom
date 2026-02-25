@@ -16,7 +16,7 @@ import { formatPrice } from "../../../shared/utils/helpers";
 const VendorDashboard = () => {
   const navigate = useNavigate();
   const { vendor } = useVendorAuthStore();
-  const { products, fetchProducts } = useVendorProductStore();
+  const { products, total: totalProductsCount, fetchProducts } = useVendorProductStore();
 
   const [stats, setStats] = useState({
     totalProducts: 0,
@@ -44,25 +44,22 @@ const VendorDashboard = () => {
       setIsLoading(true);
       try {
         // Fetch orders and earnings in parallel
-        const [ordersRes, earningsRes] = await Promise.all([
-          getVendorOrders({ page: 1, limit: 50 }),
+        const [ordersRes, earningsRes, pendingRes, processingRes] = await Promise.all([
+          getVendorOrders({ page: 1, limit: 5 }),
           getVendorEarnings(),
+          getVendorOrders({ page: 1, limit: 1, status: "pending" }),
+          getVendorOrders({ page: 1, limit: 1, status: "processing" }),
         ]);
 
         const ordersData = ordersRes?.data ?? ordersRes;
         const earningsData = earningsRes?.data ?? earningsRes;
+        const pendingData = pendingRes?.data ?? pendingRes;
+        const processingData = processingRes?.data ?? processingRes;
 
         const orders = ordersData?.orders ?? [];
         const summary = earningsData?.summary ?? {};
-
-        // Derive stats from real data
-        const pending = orders.filter((o) => {
-          const vendorItem = o.vendorItems?.find(
-            (vi) => vi.vendorId?.toString() === vendorId?.toString()
-          );
-          const vendorStatus = vendorItem?.status ?? o.status;
-          return vendorStatus === "pending" || vendorStatus === "processing";
-        }).length;
+        const pending =
+          Number(pendingData?.total || 0) + Number(processingData?.total || 0);
 
         setStats((prev) => ({
           ...prev,
@@ -72,7 +69,7 @@ const VendorDashboard = () => {
           pendingEarnings: summary.pendingEarnings ?? 0,
         }));
 
-        setRecentOrders(orders.slice(0, 5));
+        setRecentOrders(orders);
       } catch {
         // errors handled by api.js toast
       } finally {
@@ -88,10 +85,10 @@ const VendorDashboard = () => {
     const inStock = products.filter((p) => p.stock === "in_stock").length;
     setStats((prev) => ({
       ...prev,
-      totalProducts: products.length,
+      totalProducts: Number(totalProductsCount || 0),
       inStockProducts: inStock,
     }));
-  }, [products]);
+  }, [products, totalProductsCount]);
 
   const statCards = [
     {

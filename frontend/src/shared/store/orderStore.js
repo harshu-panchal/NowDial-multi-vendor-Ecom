@@ -1,6 +1,5 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import { useCommissionStore } from './commissionStore';
 import api from '../utils/api';
 
 const isMongoId = (value) => /^[a-fA-F0-9]{24}$/.test(String(value || ''));
@@ -39,74 +38,26 @@ const normalizePublicTrackingOrder = (order) =>
     vendorItems: [],
   });
 
-const localCreateOrder = (orderData) => {
-  const orderId = `ORD-${Date.now()}`;
-  const trackingNumber = `TRK${Math.random().toString(36).substring(2, 11).toUpperCase()}`;
-
-  const estimatedDelivery = new Date();
-  estimatedDelivery.setDate(
-    estimatedDelivery.getDate() + Math.floor(Math.random() * 3) + 5
-  );
-
-  const vendorItems = orderData.vendorItems || [];
-  let calculatedVendorItems = [];
-
-  if (vendorItems.length === 0 && orderData.items) {
-    const vendorGroups = {};
-    orderData.items.forEach((item) => {
-      const vendorId = item.vendorId || 1;
-      const vendorName = item.vendorName || 'Unknown Vendor';
-
-      if (!vendorGroups[vendorId]) {
-        vendorGroups[vendorId] = {
-          vendorId,
-          vendorName,
-          items: [],
-          subtotal: 0,
-          shipping: 0,
-          tax: 0,
-          discount: 0,
-        };
-      }
-
-      const itemSubtotal = item.price * item.quantity;
-      vendorGroups[vendorId].items.push(item);
-      vendorGroups[vendorId].subtotal += itemSubtotal;
-    });
-
-    const totalSubtotal = Object.values(vendorGroups).reduce((sum, v) => sum + v.subtotal, 0);
-    const shippingPerVendor = orderData.shipping / Math.max(1, Object.keys(vendorGroups).length);
-
-    calculatedVendorItems = Object.values(vendorGroups).map((vendorGroup) => ({
-      ...vendorGroup,
-      shipping: shippingPerVendor,
-      tax: (vendorGroup.subtotal * (orderData.tax || 0)) / (totalSubtotal || 1),
-      discount: (vendorGroup.subtotal * (orderData.discount || 0)) / (totalSubtotal || 1),
-    }));
-  } else {
-    calculatedVendorItems = vendorItems;
-  }
-
-  return normalizeOrder({
-    id: orderId,
-    orderId,
-    userId: orderData.userId || null,
-    date: new Date().toISOString(),
-    status: 'pending',
-    items: orderData.items || [],
-    vendorItems: calculatedVendorItems,
-    shippingAddress: orderData.shippingAddress || {},
-    paymentMethod: orderData.paymentMethod || 'card',
-    subtotal: orderData.subtotal || 0,
-    shipping: orderData.shipping || 0,
-    tax: orderData.tax || 0,
-    discount: orderData.discount || 0,
-    total: orderData.total || 0,
-    couponCode: orderData.couponCode || null,
-    trackingNumber,
-    estimatedDelivery: estimatedDelivery.toISOString(),
-    __source: 'local',
+const buildIdempotencyKey = (payload, userId = null) => {
+  const base = JSON.stringify({
+    userId: userId || null,
+    items: payload?.items || [],
+    shippingAddress: payload?.shippingAddress || {},
+    paymentMethod: payload?.paymentMethod || "",
+    couponCode: payload?.couponCode || "",
+    shippingOption: payload?.shippingOption || "standard",
   });
+
+  let hash = 0;
+  for (let i = 0; i < base.length; i += 1) {
+    hash = (hash << 5) - hash + base.charCodeAt(i);
+    hash |= 0;
+  }
+  const attemptNonce =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
+  return `ord-${Math.abs(hash)}-${payload?.items?.length || 0}-${attemptNonce}`;
 };
 
 export const useOrderStore = create(
@@ -115,29 +66,22 @@ export const useOrderStore = create(
       orders: [],
       isLoading: false,
       hasFetched: false,
+      lastError: null,
+      orderPagination: { total: 0, page: 1, pages: 1, limit: 20 },
 
       // Create a new order
       createOrder: async (orderData) => {
-        const allItemsAreMongo =
-          Array.isArray(orderData?.items) &&
-          orderData.items.length > 0 &&
-          orderData.items.every((item) => isMongoId(item?.id));
-
-        // If product IDs are not backend product IDs yet, keep local flow to avoid breakage.
-        if (!allItemsAreMongo) {
-          const newOrder = localCreateOrder(orderData);
-          set((state) => ({
-            orders: [newOrder, ...state.orders],
-          }));
-
-          if (newOrder.vendorItems.length > 0) {
-            useCommissionStore.getState().recordCommission(newOrder.id, newOrder.vendorItems);
-          }
-
-          return newOrder;
+        const items = Array.isArray(orderData?.items) ? orderData.items : [];
+        if (items.length === 0) {
+          throw new Error('Your cart is empty.');
         }
 
-        set({ isLoading: true });
+        const hasInvalidProductIds = items.some((item) => !isMongoId(item?.id));
+        if (hasInvalidProductIds) {
+          throw new Error('Some cart items are outdated. Please refresh your cart and try again.');
+        }
+
+        set({ isLoading: true, lastError: null });
         try {
           const payload = {
             items: orderData.items.map((item) => ({
@@ -151,8 +95,13 @@ export const useOrderStore = create(
             couponCode: orderData.couponCode || undefined,
             shippingOption: orderData.shippingOption || 'standard',
           };
+          const idempotencyKey = buildIdempotencyKey(payload, orderData.userId);
 
-          const response = await api.post('/user/orders', payload);
+          const response = await api.post('/user/orders', payload, {
+            headers: {
+              "x-idempotency-key": idempotencyKey,
+            },
+          });
           const data = response?.data ?? response;
           const createdOrderId = data?.orderId;
 
@@ -161,33 +110,44 @@ export const useOrderStore = create(
           }
 
           const createdOrder = await get().fetchOrderById(createdOrderId);
+          if (!createdOrder) {
+            throw new Error('Order created but could not be fetched. Please check your orders.');
+          }
 
-          set({ isLoading: false });
+          set({ isLoading: false, lastError: null });
           return createdOrder;
         } catch (error) {
-          set({ isLoading: false });
+          set({ isLoading: false, lastError: error?.message || 'Failed to place order.' });
           throw error;
         }
       },
 
       fetchUserOrders: async (page = 1, limit = 20) => {
-        set({ isLoading: true });
+        set({ isLoading: true, lastError: null });
         try {
           const response = await api.get('/user/orders', { params: { page, limit } });
           const payload = response?.data ?? response;
           const list = Array.isArray(payload?.orders)
             ? payload.orders.map(normalizeOrder)
             : [];
+          const pagination = {
+            total: Number(payload?.total || 0),
+            page: Number(payload?.page || page),
+            pages: Number(payload?.pages || 1),
+            limit: Number(limit),
+          };
 
           set((state) => ({
             orders: page === 1 ? list : [...state.orders, ...list],
             hasFetched: true,
             isLoading: false,
+            lastError: null,
+            orderPagination: pagination,
           }));
 
-          return list;
+          return { orders: list, pagination };
         } catch (error) {
-          set({ isLoading: false });
+          set({ isLoading: false, lastError: error?.message || 'Failed to fetch orders.' });
           throw error;
         }
       },
@@ -203,10 +163,12 @@ export const useOrderStore = create(
 
           set((state) => ({
             orders: [normalized, ...state.orders.filter((o) => String(o.id) !== String(normalized.id))],
+            lastError: null,
           }));
 
           return normalized;
         } catch (error) {
+          set({ lastError: error?.message || 'Failed to fetch order.' });
           return null;
         }
       },
@@ -222,10 +184,12 @@ export const useOrderStore = create(
 
           set((state) => ({
             orders: [normalized, ...state.orders.filter((o) => String(o.id) !== String(normalized.id))],
+            lastError: null,
           }));
 
           return normalized;
         } catch (error) {
+          set({ lastError: error?.message || 'Failed to track order.' });
           return null;
         }
       },
@@ -290,13 +254,10 @@ export const useOrderStore = create(
         const order = get().getOrder(orderId);
         if (!order) return false;
 
-        // Sync with backend only for server-sourced orders
-        if (!order.__source || order.__source !== 'local') {
-          try {
-            await api.patch(`/user/orders/${orderId}/cancel`, { reason });
-          } catch (error) {
-            throw error;
-          }
+        try {
+          await api.patch(`/user/orders/${orderId}/cancel`, { reason });
+        } catch (error) {
+          throw error;
         }
 
         set((state) => ({
@@ -310,8 +271,32 @@ export const useOrderStore = create(
         return true;
       },
 
+      requestReturn: async (orderId, payload = {}) => {
+        const body = {
+          reason: String(payload?.reason || '').trim(),
+          ...(payload?.vendorId ? { vendorId: payload.vendorId } : {}),
+          ...(Array.isArray(payload?.items) ? { items: payload.items } : {}),
+          ...(Array.isArray(payload?.images) ? { images: payload.images } : {}),
+        };
+
+        const response = await api.post(`/user/orders/${orderId}/returns`, body);
+        const data = response?.data ?? response;
+        return data;
+      },
+
+      fetchUserReturns: async (page = 1, limit = 20, status = 'all') => {
+        const response = await api.get('/user/returns', { params: { page, limit, status } });
+        const payload = response?.data ?? response;
+        return payload?.returnRequests || [];
+      },
+
       resetOrders: () => {
-        set({ orders: [], hasFetched: false });
+        set({
+          orders: [],
+          hasFetched: false,
+          lastError: null,
+          orderPagination: { total: 0, page: 1, pages: 1, limit: 20 },
+        });
       },
     }),
     {

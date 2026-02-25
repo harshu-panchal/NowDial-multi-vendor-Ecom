@@ -46,7 +46,7 @@ export const initializeFashionHubProducts = () => {
       vendorId: 1,
       vendorName: "Fashion Hub",
       flashSale: true,
-      isNew: false,
+      isNewArrival: false,
       isFeatured: true,
       description:
         "Classic black blazer perfect for formal occasions. Tailored fit with premium fabric.",
@@ -69,7 +69,7 @@ export const initializeFashionHubProducts = () => {
       vendorId: 1,
       vendorName: "Fashion Hub",
       flashSale: false,
-      isNew: true,
+      isNewArrival: true,
       description:
         "Comfortable striped polo shirt for casual wear. Available in multiple colors.",
       tags: ["casual", "polo", "striped", "comfortable"],
@@ -91,7 +91,7 @@ export const initializeFashionHubProducts = () => {
       vendorId: 1,
       vendorName: "Fashion Hub",
       flashSale: true,
-      isNew: false,
+      isNewArrival: false,
       description:
         "Premium leather handbag with spacious interior. Perfect for daily use.",
       tags: ["handbag", "leather", "designer", "premium"],
@@ -113,7 +113,7 @@ export const initializeFashionHubProducts = () => {
       vendorId: 1,
       vendorName: "Fashion Hub",
       flashSale: false,
-      isNew: true,
+      isNewArrival: true,
       description:
         "Lightweight running shoes with excellent cushioning. Perfect for jogging and workouts.",
       tags: ["running", "sports", "comfortable", "athletic"],
@@ -135,7 +135,7 @@ export const initializeFashionHubProducts = () => {
       vendorId: 1,
       vendorName: "Fashion Hub",
       flashSale: true,
-      isNew: false,
+      isNewArrival: false,
       description:
         "Classic denim shorts with perfect fit. Great for summer casual wear.",
       tags: ["denim", "shorts", "casual", "summer"],
@@ -157,7 +157,7 @@ export const initializeFashionHubProducts = () => {
       vendorId: 1,
       vendorName: "Fashion Hub",
       flashSale: false,
-      isNew: true,
+      isNewArrival: true,
       description:
         "Beautiful pearl necklace that adds elegance to any outfit. Perfect for special occasions.",
       tags: ["pearl", "necklace", "elegant", "jewelry"],
@@ -179,7 +179,7 @@ export const initializeFashionHubProducts = () => {
       vendorId: 1,
       vendorName: "Fashion Hub",
       flashSale: true,
-      isNew: false,
+      isNewArrival: false,
       description:
         "Warm and stylish winter coat with wool blend. Keeps you cozy in cold weather.",
       tags: ["winter", "coat", "wool", "warm"],
@@ -201,7 +201,7 @@ export const initializeFashionHubProducts = () => {
       vendorId: 1,
       vendorName: "Fashion Hub",
       flashSale: false,
-      isNew: true,
+      isNewArrival: true,
       description:
         "Durable canvas backpack with multiple compartments. Perfect for school or travel.",
       tags: ["backpack", "canvas", "durable", "travel"],
@@ -223,7 +223,7 @@ export const initializeFashionHubProducts = () => {
       vendorId: 1,
       vendorName: "Fashion Hub",
       flashSale: true,
-      isNew: false,
+      isNewArrival: false,
       description:
         "Classic aviator style sunglasses with UV protection. Timeless design.",
       tags: ["sunglasses", "aviator", "UV protection", "classic"],
@@ -245,7 +245,7 @@ export const initializeFashionHubProducts = () => {
       vendorId: 1,
       vendorName: "Fashion Hub",
       flashSale: false,
-      isNew: true,
+      isNewArrival: true,
       description:
         "Beautiful floral print maxi skirt. Flowy and comfortable for any occasion.",
       tags: ["maxi", "skirt", "floral", "flowy"],
@@ -267,7 +267,7 @@ export const initializeFashionHubProducts = () => {
       vendorId: 1,
       vendorName: "Fashion Hub",
       flashSale: true,
-      isNew: false,
+      isNewArrival: false,
       description:
         "Elegant ankle strap heels perfect for evening events. Comfortable and stylish.",
       tags: ["heels", "ankle strap", "leather", "elegant"],
@@ -289,7 +289,7 @@ export const initializeFashionHubProducts = () => {
       vendorId: 1,
       vendorName: "Fashion Hub",
       flashSale: false,
-      isNew: true,
+      isNewArrival: true,
       description:
         "Warm knit beanie hat for winter. Soft and comfortable material.",
       tags: ["beanie", "hat", "winter", "knit"],

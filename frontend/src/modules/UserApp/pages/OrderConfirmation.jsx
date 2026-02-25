@@ -5,13 +5,14 @@ import { motion } from 'framer-motion';
 import MobileLayout from "../components/Layout/MobileLayout";
 import { useOrderStore } from '../../../shared/store/orderStore';
 import { formatPrice } from '../../../shared/utils/helpers';
+import { formatVariantLabel } from '../../../shared/utils/variant';
 import PageTransition from '../../../shared/components/PageTransition';
 import LazyImage from '../../../shared/components/LazyImage';
 
 const MobileOrderConfirmation = () => {
   const { orderId } = useParams();
   const navigate = useNavigate();
-  const { getOrder, fetchOrderById } = useOrderStore();
+  const { getOrder, fetchOrderById, lastError } = useOrderStore();
   const [isResolving, setIsResolving] = useState(true);
   const order = getOrder(orderId);
   const orderItems = Array.isArray(order?.items) ? order.items : [];
@@ -55,6 +56,9 @@ const MobileOrderConfirmation = () => {
           <div className="flex items-center justify-center min-h-[60vh] px-4">
             <div className="text-center">
               <h2 className="text-xl font-bold text-gray-800 mb-4">Order Not Found</h2>
+              {lastError ? (
+                <p className="text-sm text-gray-500 mb-4">{lastError}</p>
+              ) : null}
               <button
                 onClick={() => navigate('/home')}
                 className="gradient-green text-white px-6 py-3 rounded-xl font-semibold"
@@ -147,6 +151,11 @@ const MobileOrderConfirmation = () => {
                       <p className="text-xs text-gray-600">
                         {formatPrice(item.price)} x {item.quantity}
                       </p>
+                      {formatVariantLabel(item?.variant) && (
+                        <p className="text-[11px] text-gray-500">
+                          {formatVariantLabel(item?.variant)}
+                        </p>
+                      )}
                     </div>
                     <p className="font-bold text-gray-800 text-sm">
                       {formatPrice(item.price * item.quantity)}

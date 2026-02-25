@@ -4,6 +4,7 @@ import {
   FiDollarSign,
   FiShoppingBag,
   FiUsers,
+  FiPackage,
 } from "react-icons/fi";
 import { motion } from "framer-motion";
 import { formatPrice } from "../../../shared/utils/helpers";
@@ -81,6 +82,14 @@ const PerformanceMetrics = () => {
     );
   }
 
+  if (isLoading) {
+    return (
+      <div className="bg-white rounded-xl p-4 sm:p-6 shadow-sm border border-gray-200">
+        <p className="text-gray-500 text-center">Loading performance metrics...</p>
+      </div>
+    );
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -119,7 +128,7 @@ const PerformanceMetrics = () => {
         <div className="bg-white rounded-xl p-4 sm:p-6 shadow-sm border border-gray-200">
           <div className="flex items-center justify-between mb-2">
             <p className="text-sm text-gray-600">Total Products</p>
-            <FiUsers className="text-purple-600" />
+            <FiPackage className="text-purple-600" />
           </div>
           <p className="text-2xl font-bold text-gray-800">
             {metrics.totalProducts}
@@ -178,11 +187,6 @@ const PerformanceMetrics = () => {
         </div>
       </div>
 
-      {isLoading && (
-        <div className="bg-white rounded-xl p-4 sm:p-6 shadow-sm border border-gray-200">
-          <p className="text-gray-500 text-center">Loading performance metrics...</p>
-        </div>
-      )}
     </motion.div>
   );
 };

@@ -88,11 +88,23 @@ const OrderDetail = () => {
         { value: 'cancelled', label: 'Cancelled', color: 'red' },
     ];
 
+    const transitionMap = {
+        pending: ['pending', 'processing', 'cancelled'],
+        processing: ['processing', 'shipped', 'cancelled'],
+        shipped: ['shipped', 'delivered'],
+        delivered: ['delivered'],
+        cancelled: ['cancelled'],
+    };
+
     // Derive per-vendor status from vendorItems
     const vendorItem = order?.vendorItems?.find(
         (vi) => vi.vendorId?.toString() === vendorId?.toString()
     );
-    const currentStatus = vendorItem?.status ?? order?.status ?? 'pending';
+    const currentStatus = String(vendorItem?.status ?? order?.status ?? 'pending').toLowerCase();
+    const allowedStatuses = transitionMap[currentStatus] || [currentStatus];
+    const visibleStatusOptions = statusOptions.filter((option) =>
+        allowedStatuses.includes(option.value)
+    );
 
     // Items this vendor sold in this order
     const vendorItems = vendorItem?.items ?? [];
@@ -153,12 +165,12 @@ const OrderDetail = () => {
 
                 <div className="flex items-center gap-3">
                     <AnimatedSelect
-                        options={statusOptions}
+                        options={visibleStatusOptions}
                         value={currentStatus}
                         onChange={(e) => handleStatusChange(e.target.value)}
                         disabled={updatingStatus}
                         color={
-                            statusOptions.find((opt) => opt.value === currentStatus)
+                            visibleStatusOptions.find((opt) => opt.value === currentStatus)
                                 ?.color || 'gray'
                         }
                     />

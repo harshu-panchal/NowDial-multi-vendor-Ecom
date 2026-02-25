@@ -12,6 +12,7 @@ import PageTransition from "../../../shared/components/PageTransition";
 import useInfiniteScroll from "../../../shared/hooks/useInfiniteScroll";
 import LazyImage from "../../../shared/components/LazyImage";
 import { getPlaceholderImage } from "../../../shared/utils/helpers";
+import api from "../../../shared/utils/api";
 
 const normalizeId = (value) => String(value ?? "").trim();
 
@@ -22,6 +23,49 @@ const getParentId = (category) => {
     return normalizeId(parent?._id ?? parent?.id ?? "");
   }
   return normalizeId(parent);
+};
+
+const normalizeProduct = (raw) => {
+  const vendorObj =
+    raw?.vendor && typeof raw.vendor === "object"
+      ? raw.vendor
+      : raw?.vendorId && typeof raw.vendorId === "object"
+        ? raw.vendorId
+        : null;
+  const brandObj =
+    raw?.brand && typeof raw.brand === "object"
+      ? raw.brand
+      : raw?.brandId && typeof raw.brandId === "object"
+        ? raw.brandId
+        : null;
+  const categoryObj =
+    raw?.category && typeof raw.category === "object"
+      ? raw.category
+      : raw?.categoryId && typeof raw.categoryId === "object"
+        ? raw.categoryId
+        : null;
+
+  const id = normalizeId(raw?.id || raw?._id);
+
+  return {
+    ...raw,
+    id,
+    _id: id,
+    vendorId: normalizeId(vendorObj?._id || vendorObj?.id || raw?.vendorId),
+    vendorName: raw?.vendorName || vendorObj?.storeName || vendorObj?.name || "",
+    brandId: normalizeId(brandObj?._id || brandObj?.id || raw?.brandId),
+    brandName: raw?.brandName || brandObj?.name || "",
+    categoryId: normalizeId(categoryObj?._id || categoryObj?.id || raw?.categoryId),
+    categoryName: raw?.categoryName || categoryObj?.name || "",
+    image: raw?.image || raw?.images?.[0] || "",
+    images: Array.isArray(raw?.images)
+      ? raw.images
+      : raw?.image
+        ? [raw.image]
+        : [],
+    price: Number(raw?.price) || 0,
+    rating: Number(raw?.rating) || 0,
+  };
 };
 
 const MobileCategory = () => {
@@ -53,12 +97,59 @@ const MobileCategory = () => {
   const [showFilters, setShowFilters] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [viewMode, setViewMode] = useState("grid"); // 'grid' or 'list'
+  const [categoryProductsFeed, setCategoryProductsFeed] = useState([]);
   const [filters, setFilters] = useState({
-    category: "",
     minPrice: "",
     maxPrice: "",
     minRating: "",
   });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchCategoryProducts = async () => {
+      if (!categoryId) {
+        if (!cancelled) {
+          setCategoryProductsFeed([]);
+        }
+        return;
+      }
+
+      try {
+        const response = await api.get("/products", {
+          params: {
+            category: categoryId,
+            page: 1,
+            limit: 200,
+            sort: "newest",
+          },
+        });
+        const payload = response?.data ?? response;
+        const products = Array.isArray(payload?.products) ? payload.products : [];
+        if (cancelled) return;
+
+        setCategoryProductsFeed(
+          products.map(normalizeProduct).filter((product) => product.id)
+        );
+      } catch {
+        if (cancelled) return;
+        const fallback = getCatalogProducts().filter((product) => {
+          const productCategoryId = normalizeId(product.categoryId);
+          const productCategory = categories.find(
+            (cat) => normalizeId(cat.id) === productCategoryId
+          );
+          const productParentId = getParentId(productCategory);
+          return productCategoryId === categoryId || productParentId === categoryId;
+        });
+        setCategoryProductsFeed(fallback);
+      }
+    };
+
+    fetchCategoryProducts();
+    return () => {
+      cancelled = true;
+    };
+  }, [categoryId, categories]);
 
   const rootCategories = useMemo(() => {
     const roots = categories.filter(
@@ -70,26 +161,7 @@ const MobileCategory = () => {
 
   const categoryProducts = useMemo(() => {
     if (!category) return [];
-
-    const selectedId = normalizeId(categoryId);
-    let result = getCatalogProducts().filter((product) => {
-      const productCategoryId = normalizeId(product.categoryId);
-      const productCategory = categories.find(
-        (cat) => normalizeId(cat.id) === productCategoryId
-      );
-      const productParentId = getParentId(productCategory);
-      return productCategoryId === selectedId || productParentId === selectedId;
-    });
-
-    // Fallback for static demo catalog.
-    if (!result.length) {
-      const keyword = category.name?.toLowerCase()?.split(" ")[0];
-      if (keyword) {
-        result = getCatalogProducts().filter((product) =>
-          product.name?.toLowerCase().includes(keyword)
-        );
-      }
-    }
+    let result = [...categoryProductsFeed];
 
     if (searchQuery) {
       result = result.filter((product) =>
@@ -114,7 +186,7 @@ const MobileCategory = () => {
     }
 
     return result;
-  }, [categoryId, category, categories, filters, searchQuery]);
+  }, [category, categoryProductsFeed, filters, searchQuery]);
 
   const { displayedItems, hasMore, isLoading, loadMore, loadMoreRef } =
     useInfiniteScroll(categoryProducts, 10, 10);
@@ -127,7 +199,6 @@ const MobileCategory = () => {
 
   const clearFilters = () => {
     setFilters({
-      category: "",
       minPrice: "",
       maxPrice: "",
       minRating: "",
@@ -139,8 +210,7 @@ const MobileCategory = () => {
   const hasActiveFilters =
     filters.minPrice ||
     filters.maxPrice ||
-    filters.minRating ||
-    filters.category;
+    filters.minRating;
 
   // Close filter dropdown when clicking outside
   useEffect(() => {

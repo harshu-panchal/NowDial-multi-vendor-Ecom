@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useDeliveryAuthStore } from '../store/deliveryStore';
 import { FiPackage, FiCheckCircle, FiClock, FiTrendingUp, FiMapPin, FiTruck } from 'react-icons/fi';
@@ -8,15 +8,17 @@ import toast from 'react-hot-toast';
 import { formatPrice } from '../../../shared/utils/helpers';
 
 const DeliveryDashboard = () => {
-  const { deliveryBoy, updateStatus, fetchOrders, fetchProfile, isUpdatingStatus } = useDeliveryAuthStore();
+  const { deliveryBoy, updateStatus, fetchProfile, fetchDashboardSummary, isUpdatingStatus } = useDeliveryAuthStore();
   const navigate = useNavigate();
+  const statusMenuRef = useRef(null);
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [recentOrders, setRecentOrders] = useState([]);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [isDashboardLoading, setIsDashboardLoading] = useState(true);
   const [stats, setStats] = useState({
     totalOrders: 0,
     completedToday: 0,
-    pending: 0,
+    openOrders: 0,
     earnings: 0,
   });
   const statCards = [
@@ -38,8 +40,8 @@ const DeliveryDashboard = () => {
     },
     {
       icon: FiClock,
-      label: 'Pending',
-      value: stats.pending,
+      label: 'Open Orders',
+      value: stats.openOrders,
       color: 'bg-yellow-500',
       bgColor: 'bg-yellow-50',
       textColor: 'text-yellow-700',
@@ -57,32 +59,15 @@ const DeliveryDashboard = () => {
   const loadDashboardData = async () => {
     try {
       setLoadFailed(false);
+      setIsDashboardLoading(true);
       await fetchProfile();
-      const orders = await fetchOrders();
-      const today = new Date();
-      const isToday = (dateString) => {
-        const date = new Date(dateString);
-        return (
-          date.getDate() === today.getDate() &&
-          date.getMonth() === today.getMonth() &&
-          date.getFullYear() === today.getFullYear()
-        );
-      };
-
-      const completedToday = orders.filter(
-        (order) => order.status === 'completed' && isToday(order.updatedAt || order.createdAt)
-      ).length;
-      const pending = orders.filter((order) => order.status === 'pending').length;
-      const earnings = orders
-        .filter((order) => order.status === 'completed')
-        .reduce((sum, order) => sum + Number(order.deliveryFee || 0), 0);
-
-      setRecentOrders(orders.slice(0, 3));
+      const summary = await fetchDashboardSummary();
+      setRecentOrders(summary.recentOrders || []);
       setStats({
-        totalOrders: orders.length,
-        completedToday,
-        pending,
-        earnings,
+        totalOrders: Number(summary.totalOrders || 0),
+        completedToday: Number(summary.completedToday || 0),
+        openOrders: Number(summary.openOrders || 0),
+        earnings: Number(summary.earnings || 0),
       });
     } catch {
       setLoadFailed(true);
@@ -90,15 +75,32 @@ const DeliveryDashboard = () => {
       setStats({
         totalOrders: 0,
         completedToday: 0,
-        pending: 0,
+        openOrders: 0,
         earnings: 0,
       });
+    } finally {
+      setIsDashboardLoading(false);
     }
   };
 
   useEffect(() => {
     loadDashboardData();
-  }, [fetchOrders, fetchProfile]);
+  }, [fetchDashboardSummary, fetchProfile]);
+
+  useEffect(() => {
+    if (!statusMenuOpen) return undefined;
+    const handleClickOutside = (event) => {
+      if (statusMenuRef.current && !statusMenuRef.current.contains(event.target)) {
+        setStatusMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+    };
+  }, [statusMenuOpen]);
 
   const handleStatusChange = async (newStatus) => {
     if (isUpdatingStatus) return;
@@ -159,7 +161,7 @@ const DeliveryDashboard = () => {
                   : 'You are offline'}
               </p>
             </div>
-            <div className="relative">
+            <div className="relative" ref={statusMenuRef}>
               <button
                 onClick={() => setStatusMenuOpen(!statusMenuOpen)}
                 className="flex items-center gap-2 px-3 py-1.5 rounded-full text-white text-xs font-semibold"
@@ -233,7 +235,9 @@ const DeliveryDashboard = () => {
                   </div>
                 </div>
                 <p className={`${stat.textColor} text-xs font-medium mb-1`}>{stat.label}</p>
-                <p className={`${stat.textColor} text-xl font-bold`}>{stat.value}</p>
+                <p className={`${stat.textColor} text-xl font-bold`}>
+                  {isDashboardLoading ? <span className="inline-block h-6 w-16 rounded bg-white/60 animate-pulse" /> : stat.value}
+                </p>
               </motion.div>
             );
           })}
@@ -267,10 +271,22 @@ const DeliveryDashboard = () => {
           </div>
 
           <div className="space-y-3">
-            {displayOrders.length === 0 && (
+            {isDashboardLoading && (
+              <div className="space-y-3">
+                {[1, 2, 3].map((item) => (
+                  <div key={item} className="border border-gray-200 rounded-xl p-4">
+                    <div className="h-4 w-28 bg-gray-200 rounded animate-pulse mb-2" />
+                    <div className="h-3 w-40 bg-gray-100 rounded animate-pulse mb-3" />
+                    <div className="h-3 w-full bg-gray-100 rounded animate-pulse mb-2" />
+                    <div className="h-3 w-24 bg-gray-100 rounded animate-pulse" />
+                  </div>
+                ))}
+              </div>
+            )}
+            {!isDashboardLoading && displayOrders.length === 0 && (
               <div className="text-sm text-gray-500 py-3 text-center">No assigned orders yet.</div>
             )}
-            {displayOrders.map((order, index) => (
+            {!isDashboardLoading && displayOrders.map((order, index) => (
               <motion.div
                 key={order.id}
                 initial={{ opacity: 0, x: -20 }}

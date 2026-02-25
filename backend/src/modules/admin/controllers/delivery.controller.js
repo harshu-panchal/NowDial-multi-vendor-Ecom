@@ -5,11 +5,30 @@ import { ApiResponse } from '../../../utils/ApiResponse.js';
 import { asyncHandler } from '../../../utils/asyncHandler.js';
 import { sendEmail } from '../../../services/email.service.js';
 import { createNotification } from '../../../services/notification.service.js';
+import crypto from 'crypto';
+
+const DOC_TOKEN_TTL_MS = 10 * 60 * 1000;
+const DOC_TOKEN_QUERY_KEY = 'docToken';
+
+const buildDocToken = (relativePath) => {
+    const exp = Date.now() + DOC_TOKEN_TTL_MS;
+    const payload = `${relativePath}|${exp}`;
+    const signature = crypto
+        .createHmac('sha256', process.env.JWT_SECRET || 'delivery-doc-secret')
+        .update(payload)
+        .digest('hex');
+    return `${exp}.${signature}`;
+};
 
 const buildDocUrl = (req, relativePath = '') => {
     if (!relativePath) return '';
     if (relativePath.startsWith('http://') || relativePath.startsWith('https://')) return relativePath;
-    return `${req.protocol}://${req.get('host')}${relativePath}`;
+    const baseUrl = `${req.protocol}://${req.get('host')}${relativePath}`;
+    if (relativePath.startsWith('/uploads/delivery-docs/')) {
+        const token = buildDocToken(relativePath);
+        return `${baseUrl}?${DOC_TOKEN_QUERY_KEY}=${encodeURIComponent(token)}`;
+    }
+    return baseUrl;
 };
 
 /**
@@ -64,7 +83,7 @@ export const getAllDeliveryBoys = asyncHandler(async (req, res) => {
                                 {
                                     $and: [
                                         { $eq: ['$status', 'delivered'] },
-                                        { $eq: ['$paymentMethod', 'cod'] },
+                                        { $in: ['$paymentMethod', ['cod', 'cash']] },
                                         { $ne: ['$isCashSettled', true] }
                                     ]
                                 },
@@ -132,14 +151,14 @@ export const getDeliveryBoyById = asyncHandler(async (req, res) => {
             $group: {
                 _id: null,
                 totalDeliveries: { $sum: { $cond: [{ $eq: ['$status', 'delivered'] }, 1, 0] } },
-                totalEarnings: { $sum: { $cond: [{ $eq: ['$status', 'delivered'] }, 50, 0] } }, // Assuming flat 50 per delivery for now
+                totalEarnings: { $sum: { $cond: [{ $eq: ['$status', 'delivered'] }, '$shipping', 0] } },
                 cashInHand: {
                     $sum: {
                         $cond: [
                             {
                                 $and: [
                                     { $eq: ['$status', 'delivered'] },
-                                    { $eq: ['$paymentMethod', 'cod'] },
+                                    { $in: ['$paymentMethod', ['cod', 'cash']] },
                                     { $ne: ['$isCashSettled', true] }
                                 ]
                             },
@@ -349,10 +368,22 @@ export const updateDeliveryBoy = asyncHandler(async (req, res) => {
  * @access  Private (Admin)
  */
 export const deleteDeliveryBoy = asyncHandler(async (req, res) => {
-    const boy = await DeliveryBoy.findByIdAndDelete(req.params.id);
+    const boy = await DeliveryBoy.findById(req.params.id);
     if (!boy) {
         throw new ApiError(404, 'Delivery boy not found');
     }
+
+    const activeAssignments = await Order.countDocuments({
+        deliveryBoyId: boy._id,
+        status: { $in: ['pending', 'processing', 'shipped'] },
+        isDeleted: { $ne: true },
+    });
+
+    if (activeAssignments > 0) {
+        throw new ApiError(409, 'Cannot delete delivery boy with active assigned orders');
+    }
+
+    await DeliveryBoy.findByIdAndDelete(req.params.id);
 
     res.status(200).json(
         new ApiResponse(200, null, 'Delivery boy deleted successfully')
@@ -365,22 +396,55 @@ export const deleteDeliveryBoy = asyncHandler(async (req, res) => {
  * @access  Private (Admin)
  */
 export const settleCash = asyncHandler(async (req, res) => {
-    const { amount } = req.body; // Amount being settled
+    const boy = await DeliveryBoy.findById(req.params.id);
+    if (!boy) {
+        throw new ApiError(404, 'Delivery boy not found');
+    }
 
-    // Update all COD delivered orders for this boy that were not settled
-    const result = await Order.updateMany(
+    const baseFilter = {
+        deliveryBoyId: req.params.id,
+        status: 'delivered',
+        paymentMethod: { $in: ['cod', 'cash'] },
+        isCashSettled: { $ne: true },
+        isDeleted: { $ne: true },
+    };
+
+    const unsettledStats = await Order.aggregate([
+        { $match: baseFilter },
         {
-            deliveryBoyId: req.params.id,
-            status: 'delivered',
-            paymentMethod: 'cod',
-            isCashSettled: { $ne: true }
+            $group: {
+                _id: null,
+                count: { $sum: 1 },
+                totalAmount: { $sum: '$total' },
+            },
         },
+    ]);
+
+    const unsettledCount = unsettledStats?.[0]?.count || 0;
+    const settledAmount = Number(unsettledStats?.[0]?.totalAmount || 0);
+
+    if (unsettledCount === 0) {
+        return res.status(200).json(
+            new ApiResponse(200, { modifiedCount: 0, settledAmount: 0 }, 'No pending cash to settle')
+        );
+    }
+
+    const result = await Order.updateMany(
+        baseFilter,
         {
             $set: { isCashSettled: true, settledAt: new Date() }
         }
     );
 
+    await DeliveryBoy.findByIdAndUpdate(req.params.id, {
+        $inc: { cashCollected: settledAmount },
+    });
+
     res.status(200).json(
-        new ApiResponse(200, result, `Settled cash for ${result.modifiedCount} orders`)
+        new ApiResponse(
+            200,
+            { modifiedCount: result.modifiedCount, settledAmount },
+            `Settled cash for ${result.modifiedCount} orders`
+        )
     );
 });

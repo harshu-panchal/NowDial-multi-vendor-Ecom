@@ -5,8 +5,13 @@ import { FiThumbsUp, FiArrowRight } from "react-icons/fi";
 import ProductCard from "../../../../shared/components/ProductCard";
 import { getRecommendedProducts } from "../../data/catalogData";
 
-const RecommendedSection = () => {
-  const recommended = useMemo(() => getRecommendedProducts(6), []);
+const RecommendedSection = ({ products = null }) => {
+  const recommended = useMemo(() => {
+    if (Array.isArray(products) && products.length > 0) {
+      return products.slice(0, 6);
+    }
+    return getRecommendedProducts(6);
+  }, [products]);
 
   if (recommended.length === 0) {
     return null;

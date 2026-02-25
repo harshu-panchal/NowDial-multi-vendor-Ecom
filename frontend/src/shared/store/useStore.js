@@ -1,48 +1,94 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
-import { getProductById as getCatalogProductById } from "../../modules/UserApp/data/catalogData";
 import toast from "react-hot-toast";
+import { useAuthStore } from "./authStore";
+import { setPostLoginAction, setPostLoginRedirect } from "../utils/postLoginAction";
+import { getVariantSignature } from "../utils/variant";
+
+const getCartLineKey = (id, variant = {}) =>
+  `${String(id)}::${getVariantSignature(variant)}`;
+const getCurrentAuthUserId = () => {
+  const authState = useAuthStore.getState();
+  return String(authState?.user?.id || authState?.user?._id || "").trim();
+};
+
+const redirectToLogin = () => {
+  if (typeof window === "undefined") return;
+  const currentPath = window.location.pathname || "/home";
+  if (currentPath === "/login") return;
+
+  const fromPath = `${window.location.pathname || ""}${window.location.search || ""}${window.location.hash || ""}`;
+  setPostLoginRedirect(fromPath || "/home");
+
+  // SPA-friendly redirect without full page reload.
+  const nextState = { from: { pathname: fromPath || "/home" } };
+  window.history.pushState(nextState, "", "/login");
+  window.dispatchEvent(new PopStateEvent("popstate", { state: nextState }));
+};
 
 // Cart Store
 export const useCartStore = create(
   persist(
     (set, get) => ({
       items: [],
+      ownerUserId: null,
       addItem: (item) => {
-        const product = getCatalogProductById(item.id);
-        if (!product) {
-          toast.error("Product not found");
-          return;
+        const authState = useAuthStore.getState();
+        if (!authState?.isAuthenticated) {
+          setPostLoginAction({
+            type: "cart:add",
+            payload: {
+              ...item,
+              quantity: Number(item?.quantity) > 0 ? Number(item.quantity) : 1,
+            },
+          });
+          toast.error("Please login to add products to cart");
+          redirectToLogin();
+          return false;
+        }
+        const currentUserId = getCurrentAuthUserId();
+        if (!currentUserId) {
+          toast.error("Please login to add products to cart");
+          redirectToLogin();
+          return false;
         }
 
-        if (product.stock === "out_of_stock") {
+        const ownerUserId = String(get().ownerUserId || "").trim();
+        if (ownerUserId && ownerUserId !== currentUserId) {
+          set({ items: [], ownerUserId: currentUserId });
+        }
+
+        const availableStock = Number(item?.stockQuantity);
+        if (Number.isFinite(availableStock) && availableStock <= 0) {
           toast.error("Product is out of stock");
-          return;
+          return false;
         }
 
+        const lineKey = getCartLineKey(item.id, item.variant);
         const existingItem = get().items.find(
-          (i) => String(i.id) === String(item.id)
+          (i) => String(i.cartLineKey || getCartLineKey(i.id, i.variant)) === lineKey
         );
         const quantityToAdd = item.quantity || 1;
         const newQuantity = existingItem
           ? existingItem.quantity + quantityToAdd
           : quantityToAdd;
 
-        // Check stock limit
-        if (newQuantity > product.stockQuantity) {
-          toast.error(`Only ${product.stockQuantity} items available in stock`);
-          return;
+        // If stock quantity is known on the item payload, keep local guard.
+        if (Number.isFinite(availableStock) && newQuantity > availableStock) {
+          toast.error(`Only ${availableStock} items available in stock`);
+          return false;
         }
 
         if (newQuantity <= 0) {
-          return;
+          return false;
         }
 
         // Include vendor information from product
         const itemWithVendor = {
           ...item,
-          vendorId: product.vendorId || item.vendorId || 1,
-          vendorName: product.vendorName || item.vendorName || "Unknown Vendor",
+          cartLineKey: lineKey,
+          vendorId: item.vendorId || 1,
+          vendorName: item.vendorName || "Unknown Vendor",
         };
 
         set((state) => {
@@ -50,13 +96,18 @@ export const useCartStore = create(
             return {
               items: state.items.map((i) =>
                 String(i.id) === String(item.id)
+                && String(i.cartLineKey || getCartLineKey(i.id, i.variant)) === lineKey
                   ? {
                     ...i,
                     ...itemWithVendor,
-                    quantity: Math.min(newQuantity, product.stockQuantity),
+                    quantity:
+                      Number.isFinite(availableStock)
+                        ? Math.min(newQuantity, availableStock)
+                        : newQuantity,
                   }
                   : i
               ),
+              ownerUserId: currentUserId,
             };
           }
           return {
@@ -64,47 +115,82 @@ export const useCartStore = create(
               ...state.items,
               {
                 ...itemWithVendor,
-                quantity: Math.min(quantityToAdd, product.stockQuantity),
+                quantity:
+                  Number.isFinite(availableStock)
+                    ? Math.min(quantityToAdd, availableStock)
+                    : quantityToAdd,
               },
             ],
+            ownerUserId: currentUserId,
           };
         });
 
-        if (
-          product.stock === "low_stock" &&
-          newQuantity >= product.stockQuantity * 0.8
-        ) {
-          toast.warning(`Only ${product.stockQuantity} left in stock!`);
+        if (Number.isFinite(availableStock) && newQuantity >= availableStock * 0.8) {
+          toast.warning(`Only ${availableStock} left in stock!`);
         }
 
         // Trigger cart animation
         const { triggerCartAnimation } = useUIStore.getState();
         triggerCartAnimation();
+        return true;
       },
-      removeItem: (id) =>
+      removeItem: (id, variant = null) =>
         set((state) => ({
-          items: state.items.filter((item) => String(item.id) !== String(id)),
+          items: state.items.filter((item) => {
+            if (String(item.id) !== String(id)) return true;
+            if (!variant) return false; // backwards-compatible: remove all variants for this product
+            const candidate = String(item.cartLineKey || getCartLineKey(item.id, item.variant));
+            return candidate !== getCartLineKey(id, variant);
+          }),
+          ownerUserId: state.ownerUserId,
         })),
-      updateQuantity: (id, quantity) => {
+      updateQuantity: (id, quantity, variant = null) => {
         if (quantity <= 0) {
-          get().removeItem(id);
+          get().removeItem(id, variant);
           return;
         }
 
-        const product = getCatalogProductById(id);
-        if (product && quantity > product.stockQuantity) {
-          toast.error(`Only ${product.stockQuantity} items available in stock`);
-          quantity = product.stockQuantity;
+        const targetItem = get().items.find((item) => {
+          if (String(item.id) !== String(id)) return false;
+          if (!variant) return true;
+          const candidate = String(item.cartLineKey || getCartLineKey(item.id, item.variant));
+          return candidate === getCartLineKey(id, variant);
+        });
+        const availableStock = Number(targetItem?.stockQuantity);
+        if (Number.isFinite(availableStock) && quantity > availableStock) {
+          toast.error(`Only ${availableStock} items available in stock`);
+          quantity = availableStock;
         }
 
         set((state) => ({
           items: state.items.map((item) =>
-            String(item.id) === String(id) ? { ...item, quantity } : item
+            (() => {
+              if (String(item.id) !== String(id)) return item;
+              if (!variant) return { ...item, quantity };
+              const candidate = String(item.cartLineKey || getCartLineKey(item.id, item.variant));
+              return candidate === getCartLineKey(id, variant)
+                ? { ...item, quantity }
+                : item;
+            })()
           ),
+          ownerUserId: state.ownerUserId,
         }));
       },
-      clearCart: () => set({ items: [] }),
+      clearCart: () => set((state) => ({ items: [], ownerUserId: state.ownerUserId })),
       getTotal: () => {
+        const authState = useAuthStore.getState();
+        if (!authState?.isAuthenticated) {
+          if (get().items.length > 0 || get().ownerUserId) {
+            set({ items: [], ownerUserId: null });
+          }
+          return 0;
+        }
+        const currentUserId = getCurrentAuthUserId();
+        const ownerUserId = String(get().ownerUserId || "").trim();
+        if (ownerUserId && currentUserId && ownerUserId !== currentUserId) {
+          set({ items: [], ownerUserId: currentUserId });
+          return 0;
+        }
         const state = useCartStore.getState();
         return state.items.reduce(
           (total, item) => total + item.price * item.quantity,
@@ -112,11 +198,37 @@ export const useCartStore = create(
         );
       },
       getItemCount: () => {
+        const authState = useAuthStore.getState();
+        if (!authState?.isAuthenticated) {
+          if (get().items.length > 0 || get().ownerUserId) {
+            set({ items: [], ownerUserId: null });
+          }
+          return 0;
+        }
+        const currentUserId = getCurrentAuthUserId();
+        const ownerUserId = String(get().ownerUserId || "").trim();
+        if (ownerUserId && currentUserId && ownerUserId !== currentUserId) {
+          set({ items: [], ownerUserId: currentUserId });
+          return 0;
+        }
         const state = useCartStore.getState();
         return state.items.reduce((count, item) => count + item.quantity, 0);
       },
       // Group items by vendor
       getItemsByVendor: () => {
+        const authState = useAuthStore.getState();
+        if (!authState?.isAuthenticated) {
+          if (get().items.length > 0 || get().ownerUserId) {
+            set({ items: [], ownerUserId: null });
+          }
+          return [];
+        }
+        const currentUserId = getCurrentAuthUserId();
+        const ownerUserId = String(get().ownerUserId || "").trim();
+        if (ownerUserId && currentUserId && ownerUserId !== currentUserId) {
+          set({ items: [], ownerUserId: currentUserId });
+          return [];
+        }
         const state = useCartStore.getState();
         const vendorGroups = {};
 
@@ -144,6 +256,10 @@ export const useCartStore = create(
     {
       name: "cart-storage",
       storage: createJSONStorage(() => localStorage),
+      partialize: (state) => ({
+        items: state.items,
+        ownerUserId: state.ownerUserId,
+      }),
     }
   )
 );

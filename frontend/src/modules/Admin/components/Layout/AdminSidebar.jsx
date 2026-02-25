@@ -38,6 +38,7 @@ const iconMap = {
   Customers: FiUsers,
   "Delivery Management": FiTruck,
   "Offers & Sliders": FiImage,
+  Banners: FiImage,
   "Promo Codes": FiPercent,
   Notifications: FiBell,
   "Support Desk": FiMessageCircle,
@@ -75,6 +76,7 @@ const getChildRoute = (parentRoute, childName) => {
     "/admin/delivery": {
       "Delivery Boys": "/admin/delivery/delivery-boys",
       "Cash Collection": "/admin/delivery/cash-collection",
+      "Assign Delivery": "/admin/delivery/assign-delivery",
     },
     "/admin/offers": {
       "Home Sliders": "/admin/offers/home-sliders",
@@ -398,7 +400,7 @@ const AdminSidebar = ({ isOpen, onClose }) => {
       </AnimatePresence>
 
       {/* Sidebar - Desktop Fixed */}
-      <div className="hidden lg:flex fixed left-0 top-0 bottom-0 w-64 z-30">
+      <div className="hidden lg:flex fixed left-0 top-0 bottom-0 w-64 z-40">
         {sidebarContent}
       </div>
     </>

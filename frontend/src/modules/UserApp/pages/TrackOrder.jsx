@@ -4,6 +4,7 @@ import { FiCheckCircle, FiClock, FiPackage, FiTruck, FiMapPin, FiArrowLeft } fro
 import MobileLayout from "../components/Layout/MobileLayout";
 import { useOrderStore } from '../../../shared/store/orderStore';
 import { formatPrice } from '../../../shared/utils/helpers';
+import { formatVariantLabel } from '../../../shared/utils/variant';
 import PageTransition from '../../../shared/components/PageTransition';
 import Badge from '../../../shared/components/Badge';
 import LazyImage from '../../../shared/components/LazyImage';
@@ -12,7 +13,7 @@ import { useAuthStore } from '../../../shared/store/authStore';
 const MobileTrackOrder = () => {
   const { orderId } = useParams();
   const navigate = useNavigate();
-  const { getOrder, fetchOrderById, fetchPublicTrackingOrder } = useOrderStore();
+  const { getOrder, fetchOrderById, fetchPublicTrackingOrder, lastError } = useOrderStore();
   const { user } = useAuthStore();
   const [isResolving, setIsResolving] = useState(true);
   const order = getOrder(orderId);
@@ -20,6 +21,13 @@ const MobileTrackOrder = () => {
   const orderItems = Array.isArray(order?.items) ? order.items : [];
   const normalizedStatus = String(order?.status || 'pending').toLowerCase();
   const displayOrderId = order?.id || order?.orderId || orderId;
+  const hasShippingAddress = Boolean(
+    shippingAddress?.name ||
+    shippingAddress?.address ||
+    shippingAddress?.city ||
+    shippingAddress?.state ||
+    shippingAddress?.zipCode
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -62,6 +70,9 @@ const MobileTrackOrder = () => {
           <div className="flex items-center justify-center min-h-[60vh] px-4">
             <div className="text-center">
               <h2 className="text-xl font-bold text-gray-800 mb-4">Order Not Found</h2>
+              {lastError ? (
+                <p className="text-sm text-gray-500 mb-4">{lastError}</p>
+              ) : null}
               <button
                 onClick={() => navigate(user?.id ? '/orders' : '/home')}
                 className="gradient-green text-white px-6 py-3 rounded-xl font-semibold"
@@ -103,17 +114,13 @@ const MobileTrackOrder = () => {
       {
         label: 'Processing',
         completed: !isCancelled && isProcessingOrLater,
-        date: normalizedStatus !== 'pending' && !isCancelled
-          ? new Date(new Date(order?.date || order?.createdAt).getTime() + 24 * 60 * 60 * 1000).toISOString()
-          : null,
+        date: order?.processingAt || null,
         icon: FiPackage,
       },
       {
         label: 'Shipped',
         completed: !isCancelled && isShippedOrLater,
-        date: isShippedOrLater
-          ? new Date(new Date(order?.date || order?.createdAt).getTime() + 2 * 24 * 60 * 60 * 1000).toISOString()
-          : null,
+        date: order?.shippedAt || null,
         icon: FiTruck,
       },
       {
@@ -128,7 +135,7 @@ const MobileTrackOrder = () => {
       steps.push({
         label: isCancelled ? 'Cancelled' : 'Returned',
         completed: true,
-        date: order?.cancelledAt || order?.updatedAt || order?.deliveredAt || order?.estimatedDelivery || order?.date || order?.createdAt,
+        date: order?.cancelledAt || order?.returnedAt || order?.updatedAt || order?.date || order?.createdAt,
         icon: FiClock,
       });
     }
@@ -195,20 +202,22 @@ const MobileTrackOrder = () => {
               )}
 
               {/* Shipping Address */}
-              <div className="glass-card rounded-2xl p-4">
-                <h2 className="text-base font-bold text-gray-800 mb-3 flex items-center gap-2">
-                  <FiMapPin className="text-primary-600" />
-                  Shipping Address
-                </h2>
-                <div className="text-sm text-gray-600 space-y-1">
-                  <p className="font-semibold text-gray-800">{shippingAddress.name || 'N/A'}</p>
-                  <p>{shippingAddress.address || 'N/A'}</p>
-                  <p>
-                    {shippingAddress.city || 'N/A'}, {shippingAddress.state || 'N/A'}{' '}
-                    {shippingAddress.zipCode || 'N/A'}
-                  </p>
+              {hasShippingAddress ? (
+                <div className="glass-card rounded-2xl p-4">
+                  <h2 className="text-base font-bold text-gray-800 mb-3 flex items-center gap-2">
+                    <FiMapPin className="text-primary-600" />
+                    Shipping Address
+                  </h2>
+                  <div className="text-sm text-gray-600 space-y-1">
+                    <p className="font-semibold text-gray-800">{shippingAddress.name || 'N/A'}</p>
+                    <p>{shippingAddress.address || 'N/A'}</p>
+                    <p>
+                      {shippingAddress.city || 'N/A'}, {shippingAddress.state || 'N/A'}{' '}
+                      {shippingAddress.zipCode || 'N/A'}
+                    </p>
+                  </div>
                 </div>
-              </div>
+              ) : null}
 
               {/* Order Items */}
               <div className="glass-card rounded-2xl p-4">
@@ -228,6 +237,11 @@ const MobileTrackOrder = () => {
                         <p className="text-xs text-gray-600">
                           {formatPrice(item.price)} x {item.quantity}
                         </p>
+                        {formatVariantLabel(item?.variant) && (
+                          <p className="text-[11px] text-gray-500">
+                            {formatVariantLabel(item?.variant)}
+                          </p>
+                        )}
                       </div>
                       <p className="font-bold text-gray-800 text-sm">
                         {formatPrice(item.price * item.quantity)}

@@ -14,6 +14,18 @@ const Customers = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [customers, setCustomers] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState({
+    total: 0,
+    page: 1,
+    limit: 10,
+    pages: 1,
+  });
+  const [summary, setSummary] = useState({
+    totalCustomers: 0,
+    totalRevenue: 0,
+    averageCustomerValue: 0,
+  });
 
   const vendorId = vendor?.id || vendor?._id;
 
@@ -26,28 +38,38 @@ const Customers = () => {
     const fetchCustomers = async () => {
       setIsLoading(true);
       try {
-        const res = await getVendorCustomers();
+        const res = await getVendorCustomers({
+          search: searchQuery.trim(),
+          page,
+          limit: 10,
+        });
         const data = res?.data ?? res;
-        setCustomers(Array.isArray(data) ? data : []);
+        setCustomers(Array.isArray(data?.customers) ? data.customers : []);
+        setPagination(data?.pagination || { total: 0, page: 1, limit: 10, pages: 1 });
+        setSummary(
+          data?.summary || {
+            totalCustomers: 0,
+            totalRevenue: 0,
+            averageCustomerValue: 0,
+          }
+        );
       } catch {
         setCustomers([]);
+        setPagination({ total: 0, page: 1, limit: 10, pages: 1 });
+        setSummary({ totalCustomers: 0, totalRevenue: 0, averageCustomerValue: 0 });
       } finally {
         setIsLoading(false);
       }
     };
 
     fetchCustomers();
-  }, [vendorId]);
+  }, [vendorId, page, searchQuery]);
 
-  const filteredCustomers = useMemo(() => {
-    if (!searchQuery) return customers;
-    const q = searchQuery.toLowerCase();
-    return customers.filter(
-      (c) =>
-        (c.name || "").toLowerCase().includes(q) ||
-        (c.email || "").toLowerCase().includes(q)
-    );
-  }, [customers, searchQuery]);
+  useEffect(() => {
+    setPage(1);
+  }, [searchQuery]);
+
+  const filteredCustomers = useMemo(() => customers, [customers]);
 
   const columns = [
     {
@@ -137,23 +159,18 @@ const Customers = () => {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-white rounded-xl p-4 sm:p-6 shadow-sm border border-gray-200">
           <p className="text-sm text-gray-600 mb-2">Total Customers</p>
-          <p className="text-2xl font-bold text-gray-800">{customers.length}</p>
+          <p className="text-2xl font-bold text-gray-800">{summary.totalCustomers}</p>
         </div>
         <div className="bg-white rounded-xl p-4 sm:p-6 shadow-sm border border-gray-200">
           <p className="text-sm text-gray-600 mb-2">Total Revenue</p>
           <p className="text-2xl font-bold text-gray-800">
-            {formatPrice(customers.reduce((sum, c) => sum + c.totalSpent, 0))}
+            {formatPrice(summary.totalRevenue)}
           </p>
         </div>
         <div className="bg-white rounded-xl p-4 sm:p-6 shadow-sm border border-gray-200">
           <p className="text-sm text-gray-600 mb-2">Average Order Value</p>
           <p className="text-2xl font-bold text-gray-800">
-            {formatPrice(
-              customers.length > 0
-                ? customers.reduce((sum, c) => sum + c.totalSpent, 0) /
-                    customers.length
-                : 0
-            )}
+            {formatPrice(summary.averageCustomerValue)}
           </p>
         </div>
       </div>
@@ -197,12 +214,41 @@ const Customers = () => {
           <p className="text-gray-500">Loading customers...</p>
         </div>
       ) : filteredCustomers.length > 0 ? (
-        <DataTable
-          data={filteredCustomers}
-          columns={columns}
-          pagination={true}
-          itemsPerPage={10}
-        />
+        <div className="space-y-4">
+          <DataTable
+            data={filteredCustomers}
+            columns={columns}
+            pagination={false}
+          />
+          <div className="bg-white rounded-xl p-3 sm:p-4 shadow-sm border border-gray-200 flex flex-col sm:flex-row items-center justify-between gap-3">
+            <p className="text-sm text-gray-600">
+              Showing {(pagination.page - 1) * pagination.limit + 1} to{" "}
+              {Math.min(pagination.page * pagination.limit, pagination.total)} of{" "}
+              {pagination.total} customers
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={pagination.page <= 1}
+                onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+                className="px-3 py-1.5 rounded-lg border border-gray-200 text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+              >
+                Previous
+              </button>
+              <span className="text-sm text-gray-700">
+                Page {pagination.page} / {pagination.pages}
+              </span>
+              <button
+                type="button"
+                disabled={pagination.page >= pagination.pages}
+                onClick={() => setPage((prev) => Math.min(pagination.pages, prev + 1))}
+                className="px-3 py-1.5 rounded-lg border border-gray-200 text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        </div>
       ) : (
         <div className="bg-white rounded-xl p-12 shadow-sm border border-gray-200 text-center">
           <p className="text-gray-500">No customers found</p>

@@ -1,92 +1,157 @@
-import { useState, useEffect } from 'react';
-import { FiCheck } from 'react-icons/fi';
-import { formatPrice } from '../../utils/helpers';
+import { useState, useEffect, useMemo } from "react";
+import { FiCheck } from "react-icons/fi";
+import { formatPrice } from "../../utils/helpers";
+import { getVariantSignature } from "../../utils/variant";
+
+const normalizeAxisName = (value) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_");
+
+const toEntries = (value) => {
+  if (!value) return [];
+  if (value instanceof Map) return Array.from(value.entries());
+  if (typeof value === "object") return Object.entries(value);
+  return [];
+};
 
 const VariantSelector = ({ variants, onVariantChange, currentPrice }) => {
-  const [selectedVariant, setSelectedVariant] = useState(null);
+  const [selectedVariant, setSelectedVariant] = useState({});
 
-  useEffect(() => {
-    // Initialize with default variant or first available
-    if (variants) {
-      if (variants.defaultVariant) {
-        setSelectedVariant(variants.defaultVariant);
-      } else if (variants.sizes && variants.sizes.length > 0) {
-        setSelectedVariant({ size: variants.sizes[0] });
-      } else if (variants.colors && variants.colors.length > 0) {
-        setSelectedVariant({ color: variants.colors[0] });
-      }
-    }
+  const axes = useMemo(() => {
+    const dynamicAxes = Array.isArray(variants?.attributes)
+      ? variants.attributes
+          .map((attr) => ({
+            label: String(attr?.name || "").trim(),
+            key: normalizeAxisName(attr?.name),
+            values: Array.isArray(attr?.values) ? attr.values : [],
+          }))
+          .filter((attr) => attr.label && attr.key && attr.values.length > 0)
+      : [];
+    if (dynamicAxes.length) return dynamicAxes;
+
+    const fallback = [];
+    const sizes = Array.isArray(variants?.sizes) ? variants.sizes : [];
+    const colors = Array.isArray(variants?.colors) ? variants.colors : [];
+    if (sizes.length) fallback.push({ label: "Size", key: "size", values: sizes });
+    if (colors.length) fallback.push({ label: "Color", key: "color", values: colors });
+    return fallback;
   }, [variants]);
 
-  useEffect(() => {
-    if (selectedVariant && onVariantChange) {
-      onVariantChange(selectedVariant);
+  const getVariantStockValue = (selection) => {
+    const entries = toEntries(variants?.stockMap);
+    if (!entries.length) return null;
+    const key = getVariantSignature(selection);
+    if (!key) return null;
+
+    const exact = entries.find(([rawKey]) => String(rawKey).trim() === key);
+    if (exact) {
+      const parsed = Number(exact[1]);
+      if (Number.isFinite(parsed)) return parsed;
     }
-  }, [selectedVariant, onVariantChange]);
-
-  if (!variants || (!variants.sizes && !variants.colors)) {
+    const normalized = entries.find(
+      ([rawKey]) => String(rawKey).trim().toLowerCase() === key.toLowerCase()
+    );
+    if (normalized) {
+      const parsed = Number(normalized[1]);
+      if (Number.isFinite(parsed)) return parsed;
+    }
     return null;
-  }
-
-  const handleSizeSelect = (size) => {
-    setSelectedVariant((prev) => ({
-      ...prev,
-      size,
-    }));
   };
 
-  const handleColorSelect = (color) => {
-    setSelectedVariant((prev) => ({
-      ...prev,
-      color,
-    }));
+  useEffect(() => {
+    const nextSelection = {};
+    const defaultSelection = variants?.defaultSelection && typeof variants.defaultSelection === "object"
+      ? variants.defaultSelection
+      : {};
+    axes.forEach((axis) => {
+      const directDefault = String(defaultSelection?.[axis.key] || "").trim();
+      const legacyDefault = axis.key === "size"
+        ? String(variants?.defaultVariant?.size || "").trim()
+        : axis.key === "color"
+        ? String(variants?.defaultVariant?.color || "").trim()
+        : "";
+      const selected = directDefault || legacyDefault;
+      if (selected) nextSelection[axis.key] = selected;
+    });
+    setSelectedVariant(nextSelection);
+  }, [axes, variants]);
+
+  useEffect(() => {
+    onVariantChange?.(selectedVariant || {});
+  }, [selectedVariant, onVariantChange]);
+
+  if (!axes.length) return null;
+
+  const handleOptionSelect = (axisKey, value) => {
+    setSelectedVariant((prev) => {
+      const isSame = String(prev?.[axisKey] || "") === String(value || "");
+      const next = { ...(prev || {}) };
+      if (isSame) {
+        delete next[axisKey];
+      } else {
+        next[axisKey] = value;
+      }
+      return next;
+    });
+  };
+
+  const isOptionAvailable = (axisKey, value) => {
+    const previewSelection = { ...(selectedVariant || {}), [axisKey]: value };
+    const stock = getVariantStockValue(previewSelection);
+    return stock === null ? true : stock > 0;
   };
 
   const getVariantPrice = () => {
-    if (!variants.prices || !selectedVariant) return currentPrice;
-    
-    if (selectedVariant.size && variants.prices[selectedVariant.size]) {
-      return variants.prices[selectedVariant.size];
+    const base = Number(currentPrice) || 0;
+    const entries = toEntries(variants?.prices);
+    if (!entries.length) return base;
+    const key = getVariantSignature(selectedVariant || {});
+    if (!key) return base;
+    const exact = entries.find(([rawKey]) => String(rawKey).trim() === key);
+    if (exact) {
+      const parsed = Number(exact[1]);
+      if (Number.isFinite(parsed) && parsed >= 0) return parsed;
     }
-    if (selectedVariant.color && variants.prices[selectedVariant.color]) {
-      return variants.prices[selectedVariant.color];
+    const normalized = entries.find(
+      ([rawKey]) => String(rawKey).trim().toLowerCase() === key.toLowerCase()
+    );
+    if (normalized) {
+      const parsed = Number(normalized[1]);
+      if (Number.isFinite(parsed) && parsed >= 0) return parsed;
     }
-    return currentPrice;
-  };
-
-  const isVariantAvailable = (variantType, value) => {
-    if (!variants.stock) return true;
-    const key = variantType === 'size' ? `size_${value}` : `color_${value}`;
-    return variants.stock[key] !== undefined && variants.stock[key] > 0;
+    return base;
   };
 
   return (
     <div className="space-y-6">
-      {/* Size Variants */}
-      {variants.sizes && variants.sizes.length > 0 && (
-        <div>
+      {axes.map((axis) => (
+        <div key={axis.key}>
           <label className="block text-sm font-semibold text-gray-700 mb-3">
-            Size: <span className="font-normal text-gray-600">{selectedVariant?.size || 'Select size'}</span>
+            {axis.label}:{" "}
+            <span className="font-normal text-gray-600">
+              {selectedVariant?.[axis.key] || `Select ${axis.label.toLowerCase()}`}
+            </span>
           </label>
           <div className="flex flex-wrap gap-3">
-            {variants.sizes.map((size) => {
-              const isSelected = selectedVariant?.size === size;
-              const isAvailable = isVariantAvailable('size', size);
-              
+            {axis.values.map((option) => {
+              const isSelected = selectedVariant?.[axis.key] === option;
+              const isAvailable = isOptionAvailable(axis.key, option);
               return (
                 <button
-                  key={size}
-                  onClick={() => handleSizeSelect(size)}
+                  key={`${axis.key}-${option}`}
+                  onClick={() => handleOptionSelect(axis.key, option)}
                   disabled={!isAvailable}
-                  className={`relative px-6 py-3 rounded-xl font-semibold border-2 transition-all duration-300 ${
+                  className={`relative px-4 py-2 rounded-xl font-semibold border-2 transition-all duration-300 ${
                     isSelected
-                      ? 'border-primary-600 bg-primary-50 text-primary-700'
+                      ? "border-primary-600 bg-primary-50 text-primary-700"
                       : isAvailable
-                      ? 'border-gray-200 hover:border-primary-400 bg-white text-gray-700'
-                      : 'border-gray-100 bg-gray-50 text-gray-400 cursor-not-allowed opacity-50'
+                      ? "border-gray-200 hover:border-primary-400 bg-white text-gray-700"
+                      : "border-gray-100 bg-gray-50 text-gray-400 cursor-not-allowed opacity-50"
                   }`}
                 >
-                  {size}
+                  {option}
                   {isSelected && (
                     <span className="absolute -top-1 -right-1 w-5 h-5 bg-primary-600 rounded-full flex items-center justify-center">
                       <FiCheck className="text-white text-xs" />
@@ -97,60 +162,9 @@ const VariantSelector = ({ variants, onVariantChange, currentPrice }) => {
             })}
           </div>
         </div>
-      )}
+      ))}
 
-      {/* Color Variants */}
-      {variants.colors && variants.colors.length > 0 && (
-        <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-3">
-            Color: <span className="font-normal text-gray-600">{selectedVariant?.color || 'Select color'}</span>
-          </label>
-          <div className="flex flex-wrap gap-3">
-            {variants.colors.map((color) => {
-              const isSelected = selectedVariant?.color === color;
-              const isAvailable = isVariantAvailable('color', color);
-              
-              // Check if color is a hex code or color name
-              const isHexColor = /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/.test(color);
-              
-              return (
-                <button
-                  key={color}
-                  onClick={() => handleColorSelect(color)}
-                  disabled={!isAvailable}
-                  className={`relative w-12 h-12 rounded-full border-2 transition-all duration-300 ${
-                    isSelected
-                      ? 'border-primary-600 scale-110 shadow-lg'
-                      : isAvailable
-                      ? 'border-gray-300 hover:border-primary-400 hover:scale-105'
-                      : 'border-gray-200 opacity-50 cursor-not-allowed'
-                  }`}
-                  style={
-                    isHexColor
-                      ? {
-                          backgroundColor: color,
-                        }
-                      : {}
-                  }
-                  title={color}
-                >
-                  {!isHexColor && (
-                    <span className="text-xs font-semibold text-gray-700">{color.charAt(0)}</span>
-                  )}
-                  {isSelected && (
-                    <span className="absolute -top-1 -right-1 w-5 h-5 bg-primary-600 rounded-full flex items-center justify-center">
-                      <FiCheck className="text-white text-xs" />
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Price Display */}
-      {getVariantPrice() !== currentPrice && (
+      {getVariantPrice() !== Number(currentPrice || 0) && (
         <div className="p-4 bg-primary-50 rounded-xl border border-primary-200">
           <p className="text-sm text-gray-600 mb-1">Selected variant price:</p>
           <p className="text-xl font-bold text-primary-700">{formatPrice(getVariantPrice())}</p>

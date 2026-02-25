@@ -18,7 +18,7 @@ import {
 } from "react-icons/fi";
 import { motion } from "framer-motion";
 import { useVendorStore } from "../../store/vendorStore";
-import { getAllOrders } from "../../services/adminService";
+import { getAllOrders, getVendorCommissions } from "../../services/adminService";
 import Badge from "../../../../shared/components/Badge";
 import DataTable from "../../components/DataTable";
 import { formatPrice } from "../../../../shared/utils/helpers";
@@ -48,10 +48,25 @@ const VendorDetail = () => {
         setVendor(data);
         setCommissionRate(((data.commissionRate || 0) * 100).toFixed(1));
 
-        // 2. Fetch Vendor Orders
+        // 2. Fetch Vendor Orders (all pages)
         try {
-          const ordersResponse = await getAllOrders({ vendorId: id, limit: 100 }); // Fetch enough for stats
-          const normalizedOrders = (ordersResponse?.data?.orders || []).map((order) => ({
+          const fetchedOrders = [];
+          let page = 1;
+          let pages = 1;
+          do {
+            const ordersResponse = await getAllOrders({
+              vendorId: id,
+              page,
+              limit: 200,
+            });
+            const payload = ordersResponse?.data ?? ordersResponse;
+            const orderPage = Array.isArray(payload?.orders) ? payload.orders : [];
+            fetchedOrders.push(...orderPage);
+            pages = Math.max(Number(payload?.pages) || 1, 1);
+            page += 1;
+          } while (page <= pages);
+
+          const normalizedOrders = fetchedOrders.map((order) => ({
             ...order,
             id: order.orderId || order._id,
             date: order.date || order.createdAt,
@@ -60,6 +75,26 @@ const VendorDetail = () => {
         } catch (error) {
           console.error("Failed to fetch vendor orders:", error);
           toast.error("Failed to load vendor orders");
+        }
+
+        // 3. Fetch vendor commissions for commissions tab + earnings summary
+        try {
+          const fetchedCommissions = [];
+          let page = 1;
+          let pages = 1;
+          do {
+            const response = await getVendorCommissions(id, { page, limit: 200 });
+            const payload = response?.data ?? response;
+            const pageCommissions = Array.isArray(payload?.commissions)
+              ? payload.commissions
+              : [];
+            fetchedCommissions.push(...pageCommissions);
+            pages = Math.max(Number(payload?.pages) || 1, 1);
+            page += 1;
+          } while (page <= pages);
+          setCommissions(fetchedCommissions);
+        } catch {
+          setCommissions([]);
         }
       } else {
         toast.error("Vendor not found");
@@ -70,30 +105,20 @@ const VendorDetail = () => {
   }, [id, getVendor, navigate]);
 
   useEffect(() => {
-    if (!vendor || vendorOrders.length === 0) return;
+    if (!vendor) return;
 
-    // Calculate earnings from real orders
-    const summary = vendorOrders.reduce((acc, order) => {
-      const vendorItem = order.vendorItems?.find((vi) =>
-        isSameVendorId(vi.vendorId, vendor.id)
-      );
-      if (vendorItem) {
-        // commission stored in vendorItem would be ideal, if not calculate it
-        const subtotal = vendorItem.subtotal || 0;
-        // Assuming simplified logic if backend doesn't return pre-calced commission yet
-        // If the order model stores commission, use it. Otherwise approximate or skip.
-        // For now, we focus on total earnings (subtotal)
-        acc.totalEarnings += subtotal;
-      }
-      return acc;
-    }, { totalEarnings: 0, pendingEarnings: 0 });
+    const summary = commissions.reduce(
+      (acc, row) => {
+        const earnings = Number(row.vendorEarnings || 0);
+        acc.totalEarnings += earnings;
+        if (row.status === "pending") acc.pendingEarnings += earnings;
+        return acc;
+      },
+      { totalEarnings: 0, pendingEarnings: 0 }
+    );
 
     setEarningsSummary(summary);
-
-    // Placeholder for commissions list until backend endpoint exists
-    setCommissions([]);
-
-  }, [vendor, vendorOrders]);
+  }, [vendor, commissions]);
 
   const handleStatusUpdate = async (newStatus) => {
     const success = await updateVendorStatus(vendor.id, newStatus);

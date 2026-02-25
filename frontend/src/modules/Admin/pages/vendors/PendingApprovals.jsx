@@ -22,6 +22,7 @@ const PendingApprovals = () => {
     vendorId: null,
     vendorName: null,
   });
+  const [rejectReason, setRejectReason] = useState("");
 
   const pendingVendors = useMemo(() => {
     let filtered = vendors.filter((v) => v.status === "pending");
@@ -157,7 +158,11 @@ const PendingApprovals = () => {
   };
 
   const handleReject = async () => {
-    const success = await updateVendorStatus(actionModal.vendorId, "rejected");
+    const success = await updateVendorStatus(
+      actionModal.vendorId,
+      "rejected",
+      rejectReason.trim()
+    );
     if (success) {
       toast.success("Vendor registration rejected");
       setActionModal({
@@ -166,6 +171,7 @@ const PendingApprovals = () => {
         vendorId: null,
         vendorName: null,
       });
+      setRejectReason("");
     } else {
       toast.error("Failed to reject vendor");
     }
@@ -181,13 +187,27 @@ const PendingApprovals = () => {
         type: "success",
       };
     } else if (actionModal.type === "reject") {
-      return {
-        title: "Reject Vendor Registration?",
-        message: `Are you sure you want to reject "${actionModal.vendorName}"? This action cannot be undone.`,
-        confirmText: "Reject",
-        onConfirm: handleReject,
-        type: "danger",
-      };
+        return {
+          title: "Reject Vendor Registration?",
+          message: `Are you sure you want to reject "${actionModal.vendorName}"? This action cannot be undone.`,
+          confirmText: "Reject",
+          onConfirm: handleReject,
+          type: "danger",
+          customContent: (
+            <div className="mt-4">
+              <label className="block text-sm font-semibold text-gray-700 mb-2">
+                Rejection Reason (optional)
+              </label>
+              <textarea
+                value={rejectReason}
+                onChange={(e) => setRejectReason(e.target.value)}
+                rows={3}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                placeholder="Provide a reason for rejection..."
+              />
+            </div>
+          ),
+        };
     }
     return null;
   };
@@ -250,12 +270,15 @@ const PendingApprovals = () => {
         <ConfirmModal
           isOpen={actionModal.isOpen}
           onClose={() =>
-            setActionModal({
-              isOpen: false,
-              type: null,
-              vendorId: null,
-              vendorName: null,
-            })
+            {
+              setActionModal({
+                isOpen: false,
+                type: null,
+                vendorId: null,
+                vendorName: null,
+              });
+              setRejectReason("");
+            }
           }
           onConfirm={modalContent.onConfirm}
           title={modalContent.title}
@@ -263,6 +286,7 @@ const PendingApprovals = () => {
           confirmText={modalContent.confirmText}
           cancelText="Cancel"
           type={modalContent.type}
+          customContent={modalContent.customContent}
         />
       )}
     </motion.div>

@@ -11,11 +11,10 @@ import * as documentController from '../controllers/document.controller.js';
 import * as notificationController from '../controllers/notification.controller.js';
 import * as returnController from '../controllers/return.controller.js';
 import * as reviewController from '../controllers/review.controller.js';
-import * as promotionController from '../controllers/promotion.controller.js';
 import * as shippingController from '../controllers/shipping.controller.js';
 import * as uploadController from '../controllers/upload.controller.js';
 import { authenticate } from '../../../middlewares/authenticate.js';
-import { authorize } from '../../../middlewares/authorize.js';
+import { authorize, enforceAccountStatus } from '../../../middlewares/authorize.js';
 import { authLimiter } from '../../../middlewares/rateLimiter.js';
 import { validate } from '../../../middlewares/validate.js';
 import {
@@ -23,14 +22,21 @@ import {
     loginSchema,
     verifyOtpSchema,
     resendOtpSchema,
+    refreshTokenSchema,
+    logoutSchema,
     forgotPasswordSchema,
     verifyResetOtpSchema,
     resetPasswordSchema
 } from '../validators/auth.validator.js';
+import {
+    createProductSchema,
+    updateProductSchema,
+    productIdParamSchema,
+} from '../validators/product.validator.js';
 import { uploadSingle, uploadMultiple, uploadDocumentSingle } from '../../../middlewares/upload.js';
 
 const router = Router();
-const vendorAuth = [authenticate, authorize('vendor')];
+const vendorAuth = [authenticate, authorize('vendor'), enforceAccountStatus];
 
 // Auth
 router.post('/auth/register', authLimiter, validate(registerSchema), authController.register);
@@ -40,16 +46,18 @@ router.post('/auth/forgot-password', authLimiter, validate(forgotPasswordSchema)
 router.post('/auth/verify-reset-otp', authLimiter, validate(verifyResetOtpSchema), authController.verifyResetOTP);
 router.post('/auth/reset-password', authLimiter, validate(resetPasswordSchema), authController.resetPassword);
 router.post('/auth/login', authLimiter, validate(loginSchema), authController.login);
+router.post('/auth/refresh', validate(refreshTokenSchema), authController.refresh);
+router.post('/auth/logout', validate(logoutSchema), authController.logout);
 router.get('/auth/profile', ...vendorAuth, authController.getProfile);
 router.put('/auth/profile', ...vendorAuth, authController.updateProfile);
 router.put('/auth/bank-details', ...vendorAuth, authController.updateBankDetails);
 
 // Products
 router.get('/products', ...vendorAuth, productController.getVendorProducts);
-router.get('/products/:id', ...vendorAuth, productController.getVendorProductById);
-router.post('/products', ...vendorAuth, productController.createProduct);
-router.put('/products/:id', ...vendorAuth, productController.updateProduct);
-router.delete('/products/:id', ...vendorAuth, productController.deleteProduct);
+router.get('/products/:id', ...vendorAuth, validate(productIdParamSchema, 'params'), productController.getVendorProductById);
+router.post('/products', ...vendorAuth, validate(createProductSchema), productController.createProduct);
+router.put('/products/:id', ...vendorAuth, validate(productIdParamSchema, 'params'), validate(updateProductSchema), productController.updateProduct);
+router.delete('/products/:id', ...vendorAuth, validate(productIdParamSchema, 'params'), productController.deleteProduct);
 router.patch('/stock/:productId', ...vendorAuth, productController.updateStock);
 
 // Orders
@@ -101,11 +109,7 @@ router.get('/reviews', ...vendorAuth, reviewController.getVendorReviews);
 router.patch('/reviews/:id/status', ...vendorAuth, reviewController.updateVendorReviewStatus);
 router.patch('/reviews/:id/response', ...vendorAuth, reviewController.addVendorReviewResponse);
 
-// Promotions
-router.get('/promotions', ...vendorAuth, promotionController.getVendorPromotions);
-router.post('/promotions', ...vendorAuth, promotionController.createVendorPromotion);
-router.put('/promotions/:id', ...vendorAuth, promotionController.updateVendorPromotion);
-router.delete('/promotions/:id', ...vendorAuth, promotionController.deleteVendorPromotion);
+
 
 // Shipping management
 router.get('/shipping/zones', ...vendorAuth, shippingController.getShippingZones);

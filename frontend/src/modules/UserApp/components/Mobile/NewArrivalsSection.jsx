@@ -4,8 +4,11 @@ import { FiTag } from "react-icons/fi";
 import LazyImage from "../../../../shared/components/LazyImage";
 import { getNewArrivals } from "../../data/catalogData";
 
-const NewArrivalsSection = () => {
-  const newArrivals = getNewArrivals(6);
+const NewArrivalsSection = ({ products = null }) => {
+  const fallback = getNewArrivals(6);
+  const newArrivals = Array.isArray(products) && products.length > 0
+    ? products.slice(0, 6)
+    : fallback;
 
   if (newArrivals.length === 0) {
     return null;

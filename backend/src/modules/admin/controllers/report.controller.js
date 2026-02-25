@@ -18,7 +18,7 @@ export const getSalesReport = asyncHandler(async (req, res) => {
     const numericLimit = Number.parseInt(limit, 10) || 20;
     const skip = (numericPage - 1) * numericLimit;
 
-    const filter = {};
+    const filter = { isDeleted: { $ne: true } };
     if (status && status !== 'all') filter.status = status;
     if (startDate || endDate) {
         filter.createdAt = {};
@@ -34,7 +34,7 @@ export const getSalesReport = asyncHandler(async (req, res) => {
         ];
     }
 
-    const [orders, total] = await Promise.all([
+    const [orders, total, totalsAgg] = await Promise.all([
         Order.find(filter)
             .populate('userId', 'name email phone')
             .sort({ createdAt: -1 })
@@ -42,19 +42,27 @@ export const getSalesReport = asyncHandler(async (req, res) => {
             .limit(numericLimit)
             .lean(),
         Order.countDocuments(filter),
+        Order.aggregate([
+            { $match: filter },
+            {
+                $group: {
+                    _id: null,
+                    totalSales: { $sum: { $ifNull: ['$total', 0] } },
+                    totalOrders: { $sum: 1 },
+                },
+            },
+        ]),
     ]);
 
-    const summary = orders.reduce(
-        (acc, order) => {
-            const totalAmount = Number(order.total) || 0;
-            acc.totalSales += totalAmount;
-            acc.totalOrders += 1;
-            return acc;
-        },
-        { totalSales: 0, totalOrders: 0 }
-    );
-    summary.averageOrderValue =
-        summary.totalOrders > 0 ? summary.totalSales / summary.totalOrders : 0;
+    const totals = totalsAgg?.[0] || { totalSales: 0, totalOrders: 0 };
+    const summary = {
+        totalSales: Number(totals.totalSales) || 0,
+        totalOrders: Number(totals.totalOrders) || 0,
+        averageOrderValue:
+            (Number(totals.totalOrders) || 0) > 0
+                ? (Number(totals.totalSales) || 0) / Number(totals.totalOrders)
+                : 0,
+    };
 
     res.status(200).json(
         new ApiResponse(
@@ -82,7 +90,7 @@ export const getInventoryReport = asyncHandler(async (req, res) => {
     if (search) filter.$text = { $search: search };
     if (status && status !== 'all') filter.stock = status;
 
-    const [products, total] = await Promise.all([
+    const [products, total, summaryAgg] = await Promise.all([
         Product.find(filter)
             .populate('categoryId', 'name')
             .populate('brandId', 'name')
@@ -91,18 +99,47 @@ export const getInventoryReport = asyncHandler(async (req, res) => {
             .limit(numericLimit)
             .lean(),
         Product.countDocuments(filter),
+        Product.aggregate([
+            { $match: filter },
+            {
+                $group: {
+                    _id: null,
+                    totalProducts: { $sum: 1 },
+                    activeProducts: {
+                        $sum: {
+                            $cond: [{ $ne: ['$isActive', false] }, 1, 0]
+                        }
+                    },
+                    lowStock: {
+                        $sum: {
+                            $cond: [{ $eq: ['$stock', 'low_stock'] }, 1, 0]
+                        }
+                    },
+                    outOfStock: {
+                        $sum: {
+                            $cond: [{ $eq: ['$stock', 'out_of_stock'] }, 1, 0]
+                        }
+                    },
+                    totalValue: {
+                        $sum: {
+                            $multiply: [
+                                { $ifNull: ['$price', 0] },
+                                { $ifNull: ['$stockQuantity', 0] },
+                            ]
+                        }
+                    },
+                }
+            }
+        ]),
     ]);
 
-    const allMatchedProducts = await Product.find(filter).select('stock stockQuantity price isActive').lean();
+    const aggregated = summaryAgg?.[0] || {};
     const summary = {
-        totalProducts: allMatchedProducts.length,
-        activeProducts: allMatchedProducts.filter((p) => p.isActive !== false).length,
-        lowStock: allMatchedProducts.filter((p) => p.stock === 'low_stock').length,
-        outOfStock: allMatchedProducts.filter((p) => p.stock === 'out_of_stock').length,
-        totalValue: allMatchedProducts.reduce(
-            (sum, p) => sum + ((Number(p.price) || 0) * (Number(p.stockQuantity) || 0)),
-            0
-        ),
+        totalProducts: Number(aggregated.totalProducts) || 0,
+        activeProducts: Number(aggregated.activeProducts) || 0,
+        lowStock: Number(aggregated.lowStock) || 0,
+        outOfStock: Number(aggregated.outOfStock) || 0,
+        totalValue: Number(aggregated.totalValue) || 0,
     };
 
     res.status(200).json(

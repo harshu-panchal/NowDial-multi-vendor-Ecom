@@ -3,6 +3,7 @@ import ApiResponse from '../../../utils/ApiResponse.js';
 import ApiError from '../../../utils/ApiError.js';
 import Review from '../../../models/Review.model.js';
 import Product from '../../../models/Product.model.js';
+import { syncProductAndVendorReviewStats } from '../../../services/reviewAggregate.service.js';
 
 const normalizeReview = (reviewDoc) => {
     const review = reviewDoc.toObject ? reviewDoc.toObject() : reviewDoc;
@@ -106,6 +107,7 @@ export const updateVendorReviewStatus = asyncHandler(async (req, res) => {
 
     await review.save();
     await review.populate('userId', 'name email');
+    await syncProductAndVendorReviewStats(review.productId?._id || review.productId);
 
     res.status(200).json(new ApiResponse(200, normalizeReview(review), 'Review status updated.'));
 });

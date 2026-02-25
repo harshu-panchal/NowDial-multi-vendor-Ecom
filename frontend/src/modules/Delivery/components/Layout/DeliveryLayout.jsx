@@ -1,17 +1,26 @@
 import { useState } from "react";
 import { Outlet, useNavigate, useLocation, Link } from "react-router-dom";
-import { FiLogOut, FiTruck, FiPackage, FiHome, FiUser, FiMenu } from "react-icons/fi";
+import { FiLogOut, FiTruck, FiPackage, FiHome, FiUser, FiMenu, FiBell } from "react-icons/fi";
 import { useDeliveryAuthStore } from "../../store/deliveryStore";
+import { useDeliveryNotificationStore } from "../../store/deliveryNotificationStore";
 import { motion, AnimatePresence } from "framer-motion";
 import toast from "react-hot-toast";
 import DeliveryBottomNav from "./DeliveryBottomNav";
 import { appLogo } from "../../../../data/logos";
+import { useEffect } from "react";
 
 const DeliveryLayout = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { deliveryBoy, logout } = useDeliveryAuthStore();
+  const { unreadCount, fetchNotifications } = useDeliveryNotificationStore();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    fetchNotifications(1);
+    const interval = setInterval(() => fetchNotifications(1), 60000);
+    return () => clearInterval(interval);
+  }, [fetchNotifications]);
 
   const handleLogout = () => {
     logout();
@@ -22,6 +31,7 @@ const DeliveryLayout = () => {
   const menuItems = [
     { icon: FiHome, label: "Dashboard", path: "/delivery/dashboard" },
     { icon: FiPackage, label: "Orders", path: "/delivery/orders" },
+    { icon: FiBell, label: "Notifications", path: "/delivery/notifications" },
     { icon: FiUser, label: "Profile", path: "/delivery/profile" },
   ];
 
@@ -155,6 +165,11 @@ const DeliveryLayout = () => {
                       }`}>
                       <Icon className="text-xl" />
                       <span className="font-medium">{item.label}</span>
+                      {item.path === "/delivery/notifications" && unreadCount > 0 && (
+                        <span className="ml-auto min-w-[20px] px-1.5 py-0.5 rounded-full bg-red-500 text-white text-xs font-semibold text-center">
+                          {unreadCount > 99 ? "99+" : unreadCount}
+                        </span>
+                      )}
                     </button>
                   );
                 })}

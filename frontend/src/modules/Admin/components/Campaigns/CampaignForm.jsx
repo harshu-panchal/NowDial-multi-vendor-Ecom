@@ -18,20 +18,19 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useCampaignStore } from "../../../../shared/store/campaignStore";
 import { useCategoryStore } from "../../../../shared/store/categoryStore";
 import { useBrandStore } from "../../../../shared/store/brandStore";
-import { products as initialProducts } from "../../../../data/products";
 import { generateSlug } from "../../../../shared/store/campaignStore";
-import { createCampaignBanner } from "@modules/Admin/utils/campaignHelpers";
 import AnimatedSelect from "../AnimatedSelect";
 import { formatPrice } from "../../../../shared/utils/helpers";
 import toast from "react-hot-toast";
 import Button from "../Button";
 import { uploadAdminImage } from "../../services/adminService";
+import { getAllProducts } from "../../services/adminService";
 
 const CampaignForm = ({ campaign, onClose, onSave }) => {
   const location = useLocation();
   const isAppRoute = location.pathname.startsWith("/app");
   const { campaigns, createCampaign, updateCampaign } = useCampaignStore();
-  const isEdit = !!campaign;
+  const isEdit = !!campaign?._id;
 
   const [formData, setFormData] = useState({
     name: "",
@@ -63,10 +62,7 @@ const CampaignForm = ({ campaign, onClose, onSave }) => {
     },
   });
 
-  const [products] = useState(() => {
-    const savedProducts = localStorage.getItem("admin-products");
-    return savedProducts ? JSON.parse(savedProducts) : initialProducts;
-  });
+  const [products, setProducts] = useState([]);
 
   // Product selection filters
   const [productSearchQuery, setProductSearchQuery] = useState("");
@@ -91,6 +87,49 @@ const CampaignForm = ({ campaign, onClose, onSave }) => {
     initCategories();
     initBrands();
   }, [initCategories, initBrands]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const fetchProducts = async () => {
+      try {
+        const response = await getAllProducts({ page: 1, limit: 500 });
+        const payload = response?.data ?? response;
+        const list = Array.isArray(payload?.products) ? payload.products : [];
+        if (cancelled) return;
+        const normalized = list.map((product) => {
+          const category =
+            product?.categoryId && typeof product.categoryId === "object"
+              ? product.categoryId
+              : null;
+          const brand =
+            product?.brandId && typeof product.brandId === "object"
+              ? product.brandId
+              : null;
+          return {
+            ...product,
+            id: String(product?._id || product?.id || ""),
+            categoryId: String(category?._id || product?.categoryId || ""),
+            brandId: String(brand?._id || product?.brandId || ""),
+            image: product?.image || product?.images?.[0] || "",
+            price: Number(product?.price) || 0,
+            originalPrice:
+              product?.originalPrice !== undefined
+                ? Number(product.originalPrice)
+                : undefined,
+          };
+        });
+        setProducts(normalized.filter((product) => product.id));
+      } catch {
+        if (!cancelled) {
+          setProducts([]);
+        }
+      }
+    };
+    fetchProducts();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Generate slug from name
   const generatedSlug = useMemo(() => {
@@ -128,7 +167,9 @@ const CampaignForm = ({ campaign, onClose, onSave }) => {
         discountValue: campaign.discountValue || "",
         startDate: campaign.startDate ? campaign.startDate.split("T")[0] : "",
         endDate: campaign.endDate ? campaign.endDate.split("T")[0] : "",
-        productIds: campaign.productIds || [],
+        productIds: Array.isArray(campaign.productIds)
+          ? campaign.productIds.map((id) => String(id))
+          : [],
         isActive: campaign.isActive !== undefined ? campaign.isActive : true,
         slug: campaign.slug || "",
         autoCreateBanner:
@@ -244,23 +285,23 @@ const CampaignForm = ({ campaign, onClose, onSave }) => {
 
     // Category filter - include products from parent category and all its subcategories
     if (selectedProductCategory !== "all") {
-      const parentCategoryId = parseInt(selectedProductCategory);
+      const parentCategoryId = String(selectedProductCategory);
       // Get all subcategories for this parent category
       const subcategories = getCategoriesByParent(parentCategoryId);
       const allCategoryIds = [
         parentCategoryId,
-        ...subcategories.map((cat) => cat.id),
+        ...subcategories.map((cat) => String(cat.id)),
       ];
 
       filtered = filtered.filter((product) =>
-        allCategoryIds.includes(product.categoryId)
+        allCategoryIds.includes(String(product.categoryId))
       );
     }
 
     // Brand filter
     if (selectedProductBrand !== "all") {
       filtered = filtered.filter(
-        (product) => product.brandId === parseInt(selectedProductBrand)
+        (product) => String(product.brandId) === String(selectedProductBrand)
       );
     }
 
@@ -302,19 +343,20 @@ const CampaignForm = ({ campaign, onClose, onSave }) => {
   ]);
 
   const handleProductToggle = (productId) => {
+    const normalizedId = String(productId);
     setFormData({
       ...formData,
-      productIds: formData.productIds.includes(productId)
-        ? formData.productIds.filter((id) => id !== productId)
-        : [...formData.productIds, productId],
+      productIds: formData.productIds.includes(normalizedId)
+        ? formData.productIds.filter((id) => String(id) !== normalizedId)
+        : [...formData.productIds, normalizedId],
     });
   };
 
   // Select all filtered products
   const handleSelectAllFiltered = () => {
-    const filteredIds = filteredProducts.map((p) => p.id);
+    const filteredIds = filteredProducts.map((p) => String(p.id));
     const allSelected = filteredIds.every((id) =>
-      formData.productIds.includes(id)
+      formData.productIds.map(String).includes(id)
     );
 
     if (allSelected) {
@@ -322,12 +364,12 @@ const CampaignForm = ({ campaign, onClose, onSave }) => {
       setFormData({
         ...formData,
         productIds: formData.productIds.filter(
-          (id) => !filteredIds.includes(id)
+          (id) => !filteredIds.includes(String(id))
         ),
       });
     } else {
       // Select all filtered
-      const newIds = [...new Set([...formData.productIds, ...filteredIds])];
+      const newIds = [...new Set([...formData.productIds.map(String), ...filteredIds])];
       setFormData({
         ...formData,
         productIds: newIds,
@@ -347,7 +389,8 @@ const CampaignForm = ({ campaign, onClose, onSave }) => {
   // Check if all filtered products are selected
   const allFilteredSelected = useMemo(() => {
     if (filteredProducts.length === 0) return false;
-    return filteredProducts.every((p) => formData.productIds.includes(p.id));
+    const selectedIds = formData.productIds.map(String);
+    return filteredProducts.every((p) => selectedIds.includes(String(p.id)));
   }, [filteredProducts, formData.productIds]);
 
   // Handle custom banner image upload
@@ -417,14 +460,13 @@ const CampaignForm = ({ campaign, onClose, onSave }) => {
         startDate: new Date(formData.startDate).toISOString(),
         endDate: new Date(formData.endDate).toISOString(),
         discountValue: parseFloat(formData.discountValue),
+        productIds: formData.productIds.map((id) => String(id)),
       };
 
       if (isEdit) {
         await updateCampaign(campaign._id, campaignData);
       } else {
         await createCampaign(campaignData);
-        // Banner auto-creation can be added here if needed, 
-        // but it's better to handle it in the backend or via separate API call
       }
       onSave?.();
       onClose();

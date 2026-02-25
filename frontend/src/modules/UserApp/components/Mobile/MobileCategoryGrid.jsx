@@ -1,16 +1,44 @@
 import { Link } from "react-router-dom";
+import { useEffect, useMemo } from "react";
 import { motion } from "framer-motion";
-import { categories } from "../../../../data/categories";
+import { categories as fallbackCategories } from "../../../../data/categories";
 import LazyImage from "../../../../shared/components/LazyImage";
+import { useCategoryStore } from "../../../../shared/store/categoryStore";
+
+const normalizeId = (value) => String(value ?? "").trim();
 
 const MobileCategoryGrid = () => {
+  const { categories, initialize, getRootCategories } = useCategoryStore();
+
+  useEffect(() => {
+    initialize();
+  }, [initialize]);
+
+  const displayCategories = useMemo(() => {
+    const roots = getRootCategories().filter((cat) => cat.isActive !== false);
+    if (!roots.length) return fallbackCategories;
+
+    return roots.map((cat) => {
+      const fallbackCat = fallbackCategories.find(
+        (fc) =>
+          normalizeId(fc.id) === normalizeId(cat.id) ||
+          fc.name?.toLowerCase() === cat.name?.toLowerCase()
+      );
+      return {
+        ...(fallbackCat || {}),
+        ...cat,
+        image: cat.image || fallbackCat?.image || "",
+      };
+    });
+  }, [categories, getRootCategories]);
+
   return (
     <div className="px-4 py-4">
       <h2 className="text-xl font-bold text-gray-800 mb-4">
         Browse Categories
       </h2>
       <div className="flex gap-3 overflow-x-auto scrollbar-hide pb-2 -mx-4 px-4">
-        {categories.map((category, index) => (
+        {displayCategories.map((category, index) => (
           <motion.div
             key={category.id}
             initial={{ opacity: 0, scale: 0.9 }}

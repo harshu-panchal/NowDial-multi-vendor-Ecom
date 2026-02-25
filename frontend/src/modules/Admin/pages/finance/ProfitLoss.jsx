@@ -6,9 +6,30 @@ import AnimatedSelect from "../../components/AnimatedSelect";
 import { formatPrice } from '../../../../shared/utils/helpers';
 import { useAnalyticsStore } from "../../../../shared/store/analyticsStore";
 
+const getRangeForPeriod = (period) => {
+  const now = new Date();
+  const endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+  let startDate = new Date(endDate);
+
+  if (period === 'week') {
+    startDate.setDate(endDate.getDate() - 6);
+  } else if (period === 'month') {
+    startDate.setDate(endDate.getDate() - 29);
+  } else {
+    startDate.setFullYear(endDate.getFullYear() - 1);
+    startDate.setDate(endDate.getDate() + 1);
+  }
+
+  return {
+    startDate: startDate.toISOString(),
+    endDate: endDate.toISOString(),
+  };
+};
+
 const ProfitLoss = () => {
   const [period, setPeriod] = useState("month");
-  const { financialSummary, isLoading, fetchFinancialSummary } = useAnalyticsStore();
+  const [isPageLoading, setIsPageLoading] = useState(false);
+  const { financialSummary, fetchFinancialSummary } = useAnalyticsStore();
 
   useEffect(() => {
     const periodMap = {
@@ -16,7 +37,22 @@ const ProfitLoss = () => {
       month: 'daily',
       year: 'monthly'
     };
-    fetchFinancialSummary(periodMap[period] || 'monthly');
+    const range = getRangeForPeriod(period);
+    let mounted = true;
+
+    const run = async () => {
+      setIsPageLoading(true);
+      try {
+        await fetchFinancialSummary(periodMap[period] || 'monthly', range);
+      } finally {
+        if (mounted) setIsPageLoading(false);
+      }
+    };
+
+    run();
+    return () => {
+      mounted = false;
+    };
   }, [period, fetchFinancialSummary]);
 
   const chartData = useMemo(() => {
@@ -28,24 +64,27 @@ const ProfitLoss = () => {
 
   const financials = useMemo(() => {
     const revenue = financialSummary.reduce((sum, item) => sum + item.revenue, 0);
-    // Derived values for demo consistency with mock UI
-    const costOfGoods = revenue * 0.6;
-    const operatingExpenses = revenue * 0.2;
-    const grossProfit = revenue - costOfGoods;
-    const netProfit = grossProfit - operatingExpenses;
+    const totalTax = financialSummary.reduce((sum, item) => sum + (item.tax || 0), 0);
+    const totalDelivery = financialSummary.reduce((sum, item) => sum + (item.delivery || 0), 0);
+    const totalDiscount = financialSummary.reduce((sum, item) => sum + (item.discount || 0), 0);
+    const grossProfit = revenue - totalDiscount;
+    const totalExpenses = totalTax + totalDelivery + totalDiscount;
+    const netProfit = revenue - totalExpenses;
     const profitMargin = revenue > 0 ? (netProfit / revenue) * 100 : 0;
 
     return {
       revenue,
-      costOfGoods,
-      operatingExpenses,
+      totalTax,
+      totalDelivery,
+      totalDiscount,
+      totalExpenses,
       grossProfit,
       netProfit,
       profitMargin,
     };
   }, [financialSummary]);
 
-  if (isLoading && financialSummary.length === 0) {
+  if (isPageLoading && financialSummary.length === 0) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
@@ -94,28 +133,32 @@ const ProfitLoss = () => {
         </div>
 
         <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
-          <h3 className="text-lg font-bold text-gray-800 mb-4">Expenses</h3>
+          <h3 className="text-lg font-bold text-gray-800 mb-4">Deductions</h3>
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <span className="text-gray-600">Cost of Goods Sold</span>
+              <span className="text-gray-600">Discount</span>
               <span className="font-bold text-red-600">
-                {formatPrice(financials.costOfGoods)}
+                {formatPrice(financials.totalDiscount)}
               </span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-gray-600">Operating Expenses</span>
+              <span className="text-gray-600">Tax</span>
               <span className="font-bold text-red-600">
-                {formatPrice(financials.operatingExpenses)}
+                {formatPrice(financials.totalTax)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-gray-600">Shipping</span>
+              <span className="font-bold text-red-600">
+                {formatPrice(financials.totalDelivery)}
               </span>
             </div>
             <div className="border-t border-gray-200 pt-4 flex items-center justify-between">
               <span className="font-semibold text-gray-800">
-                Total Expenses
+                Total Deductions
               </span>
               <span className="font-bold text-red-600">
-                {formatPrice(
-                  financials.costOfGoods + financials.operatingExpenses
-                )}
+                {formatPrice(financials.totalExpenses)}
               </span>
             </div>
           </div>

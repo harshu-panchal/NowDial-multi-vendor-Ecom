@@ -5,8 +5,11 @@ import { FiClock, FiZap } from "react-icons/fi";
 import ProductCard from "../../../../shared/components/ProductCard";
 import { getDailyDeals } from "../../data/catalogData";
 
-const DailyDealsSection = () => {
-  const dailyDeals = getDailyDeals().slice(0, 5);
+const DailyDealsSection = ({ products = null }) => {
+  const fallback = getDailyDeals().slice(0, 5);
+  const dailyDeals = Array.isArray(products) && products.length > 0
+    ? products.slice(0, 5)
+    : fallback;
   const [timeLeft, setTimeLeft] = useState({
     hours: 23,
     minutes: 59,

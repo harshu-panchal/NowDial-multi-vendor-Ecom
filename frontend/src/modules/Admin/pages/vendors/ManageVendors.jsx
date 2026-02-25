@@ -16,16 +16,14 @@ import ConfirmModal from "../../components/ConfirmModal";
 import AnimatedSelect from "../../components/AnimatedSelect";
 import { formatPrice } from "../../../../shared/utils/helpers";
 import { useVendorStore } from "../../store/vendorStore";
-import { useOrderStore } from "../../../../shared/store/orderStore";
-import { useCommissionStore } from "../../../../shared/store/commissionStore";
+import { getAllOrders } from "../../services/adminService";
 import toast from "react-hot-toast";
 
 const ManageVendors = () => {
   const navigate = useNavigate();
   const { vendors, initialize, updateVendorStatus, updateCommissionRate } =
     useVendorStore();
-  const { orders } = useOrderStore();
-  const { getVendorEarningsSummary } = useCommissionStore();
+  const [orders, setOrders] = useState([]);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedStatus, setSelectedStatus] = useState("all");
@@ -36,9 +34,29 @@ const ManageVendors = () => {
     vendorName: null,
   });
   const [commissionRate, setCommissionRate] = useState("");
+  const [statusReason, setStatusReason] = useState("");
 
   useEffect(() => {
-    initialize();
+    const bootstrap = async () => {
+      await initialize();
+      try {
+        const fetchedOrders = [];
+        let page = 1;
+        let pages = 1;
+        do {
+          const response = await getAllOrders({ page, limit: 200 });
+          const payload = response?.data ?? response;
+          const orderPage = Array.isArray(payload?.orders) ? payload.orders : [];
+          fetchedOrders.push(...orderPage);
+          pages = Math.max(Number(payload?.pages) || 1, 1);
+          page += 1;
+        } while (page <= pages);
+        setOrders(fetchedOrders);
+      } catch {
+        setOrders([]);
+      }
+    };
+    bootstrap();
   }, [initialize]);
 
   const isSameVendorId = (a, b) => String(a) === String(b);
@@ -54,13 +72,18 @@ const ManageVendors = () => {
       return false;
     });
 
-    const earningsSummary = getVendorEarningsSummary(vendorId);
-    const vendor = vendors.find((v) => v.id === vendorId);
+    const vendor = vendors.find((v) => String(v.id) === String(vendorId));
+    const totalEarnings = vendorOrders.reduce((sum, order) => {
+      const vendorItem = order.vendorItems?.find((vi) =>
+        isSameVendorId(vi.vendorId, vendorId)
+      );
+      return sum + Number(vendorItem?.subtotal || 0);
+    }, 0);
 
     return {
       totalOrders: vendorOrders.length,
-      totalEarnings: earningsSummary?.totalEarnings || 0,
-      pendingEarnings: earningsSummary?.pendingEarnings || 0,
+      totalEarnings,
+      pendingEarnings: 0,
       commissionRate: vendor?.commissionRate || 0,
     };
   };
@@ -255,7 +278,11 @@ const ManageVendors = () => {
   };
 
   const handleSuspend = async () => {
-    const success = await updateVendorStatus(actionModal.vendorId, "suspended");
+    const success = await updateVendorStatus(
+      actionModal.vendorId,
+      "suspended",
+      statusReason.trim()
+    );
     if (success) {
       toast.success("Vendor suspended successfully");
       setActionModal({
@@ -264,6 +291,7 @@ const ManageVendors = () => {
         vendorId: null,
         vendorName: null,
       });
+      setStatusReason("");
     } else {
       toast.error("Failed to suspend vendor");
     }
@@ -307,6 +335,20 @@ const ManageVendors = () => {
           confirmText: "Suspend",
           onConfirm: handleSuspend,
           type: "danger",
+          customContent: (
+            <div className="mt-4">
+              <label className="block text-sm font-semibold text-gray-700 mb-2">
+                Suspension Reason (optional)
+              </label>
+              <textarea
+                value={statusReason}
+                onChange={(e) => setStatusReason(e.target.value)}
+                rows={3}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                placeholder="Provide a reason for suspension..."
+              />
+            </div>
+          ),
         };
       case "commission":
         return {
@@ -382,6 +424,7 @@ const ManageVendors = () => {
                 { value: "approved", label: "Approved" },
                 { value: "pending", label: "Pending" },
                 { value: "suspended", label: "Suspended" },
+                { value: "rejected", label: "Rejected" },
               ]}
               className="w-full sm:w-auto min-w-[140px]"
             />
@@ -436,6 +479,7 @@ const ManageVendors = () => {
               vendorName: null,
             });
             setCommissionRate("");
+            setStatusReason("");
           }}
           onConfirm={modalContent.onConfirm}
           title={modalContent.title}

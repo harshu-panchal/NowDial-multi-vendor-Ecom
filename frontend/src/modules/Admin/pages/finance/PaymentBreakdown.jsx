@@ -3,7 +3,7 @@ import { FiLoader } from "react-icons/fi";
 import { motion } from "framer-motion";
 import PaymentBreakdownPieChart from "../../components/Analytics/PaymentBreakdownPieChart";
 import { formatPrice } from '../../../../shared/utils/helpers';
-import { getAllOrders } from "../../services/adminService";
+import { getSalesReport } from "../../services/adminService";
 
 const PaymentBreakdown = () => {
   const [orders, setOrders] = useState([]);
@@ -19,8 +19,8 @@ const PaymentBreakdown = () => {
         let page = 1;
         let totalPages = 1;
 
-        while (page <= totalPages && page <= 20) {
-          const response = await getAllOrders({ page, limit: 200 });
+        while (page <= totalPages) {
+          const response = await getSalesReport({ page, limit: 200, status: 'delivered' });
           const payload = response?.data || {};
           allOrders.push(...(payload.orders || []));
           totalPages = payload.pages || 1;

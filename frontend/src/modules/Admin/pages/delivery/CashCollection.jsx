@@ -6,19 +6,62 @@ import {
 } from "react-icons/fi";
 import { motion } from "framer-motion";
 import DataTable from "../../components/DataTable";
+import Pagination from "../../components/Pagination";
 import Badge from "../../../../shared/components/Badge";
 import AnimatedSelect from "../../components/AnimatedSelect";
 import { formatCurrency } from "../../utils/adminHelpers";
-import { useDeliveryStore } from "../../../../shared/store/deliveryStore";
+import { settleCash as settleCashApi, getAllDeliveryBoys } from "../../services/adminService";
 
 const CashCollection = () => {
-  const { deliveryBoys, fetchDeliveryBoys, settleCash } = useDeliveryStore();
+  const [deliveryBoys, setDeliveryBoys] = useState([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("pending"); // Default to pending collection
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pagination, setPagination] = useState({
+    total: 0,
+    page: 1,
+    limit: 20,
+    pages: 1,
+  });
+  const [isSettlingId, setIsSettlingId] = useState(null);
+  const itemsPerPage = 20;
 
   useEffect(() => {
-    fetchDeliveryBoys({ search: searchQuery, page: 1, limit: 200 });
-  }, [searchQuery, fetchDeliveryBoys]);
+    const timer = setTimeout(() => {
+      const fetchPage = async () => {
+        try {
+          const response = await getAllDeliveryBoys({
+            search: searchQuery || undefined,
+            page: currentPage,
+            limit: itemsPerPage,
+          });
+          const rows = (response?.data?.deliveryBoys || []).map((boy) => ({
+            ...boy,
+            id: boy.id || boy._id,
+            cashInHand: Number(boy.cashInHand ?? boy.stats?.cashInHand ?? 0),
+            totalDeliveries: Number(boy.totalDeliveries ?? boy.stats?.totalDeliveries ?? 0),
+            cashCollected: Number(boy.cashCollected || 0),
+          }));
+          setDeliveryBoys(rows);
+          setPagination(response?.data?.pagination || {
+            total: rows.length,
+            page: 1,
+            limit: itemsPerPage,
+            pages: 1,
+          });
+        } catch {
+          setDeliveryBoys([]);
+        }
+      };
+      fetchPage();
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery, currentPage]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, statusFilter]);
 
   const boysWithCash = deliveryBoys.filter(boy => {
     const hasCash = (boy.cashInHand || 0) > 0;
@@ -27,8 +70,32 @@ const CashCollection = () => {
     return true;
   });
 
-  const totalCollected = deliveryBoys.reduce((sum, boy) => sum + Number(boy.cashCollected || 0), 0);
-  const totalPending = deliveryBoys.reduce((sum, boy) => sum + Number(boy.cashInHand || 0), 0);
+  const totalCollected = boysWithCash.reduce((sum, boy) => sum + Number(boy.cashCollected || 0), 0);
+  const totalPending = boysWithCash.reduce((sum, boy) => sum + Number(boy.cashInHand || 0), 0);
+
+  const handleSettleCash = async (row) => {
+    if (!row?.id || Number(row.cashInHand || 0) <= 0) return;
+    setIsSettlingId(row.id);
+    try {
+      await settleCashApi(row.id);
+      const response = await getAllDeliveryBoys({
+        search: searchQuery || undefined,
+        page: currentPage,
+        limit: itemsPerPage,
+      });
+      const rows = (response?.data?.deliveryBoys || []).map((boy) => ({
+        ...boy,
+        id: boy.id || boy._id,
+        cashInHand: Number(boy.cashInHand ?? boy.stats?.cashInHand ?? 0),
+        totalDeliveries: Number(boy.totalDeliveries ?? boy.stats?.totalDeliveries ?? 0),
+        cashCollected: Number(boy.cashCollected || 0),
+      }));
+      setDeliveryBoys(rows);
+      setPagination(response?.data?.pagination || pagination);
+    } finally {
+      setIsSettlingId(null);
+    }
+  };
 
   const columns = [
     {
@@ -71,9 +138,10 @@ const CashCollection = () => {
         row.cashInHand > 0 ? (
           <button
             className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-semibold flex items-center gap-2"
-            onClick={() => settleCash(row.id, row.cashInHand)}>
+            disabled={isSettlingId === row.id}
+            onClick={() => handleSettleCash(row)}>
             <FiCheckCircle />
-            Settle Cash
+            {isSettlingId === row.id ? 'Settling...' : 'Settle Cash'}
           </button>
         ) : (
           <Badge variant="success">Settled</Badge>
@@ -140,8 +208,15 @@ const CashCollection = () => {
         <DataTable
           data={boysWithCash}
           columns={columns}
-          pagination={true}
-          itemsPerPage={10}
+          pagination={false}
+        />
+        <Pagination
+          currentPage={pagination.page || currentPage}
+          totalPages={pagination.pages || 1}
+          totalItems={pagination.total || 0}
+          itemsPerPage={itemsPerPage}
+          onPageChange={setCurrentPage}
+          className="mt-6"
         />
       </div>
     </motion.div>

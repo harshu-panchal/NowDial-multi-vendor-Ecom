@@ -1,4 +1,4 @@
-import { useMemo, useEffect } from "react";
+import { useMemo, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   FiBarChart2,
@@ -10,17 +10,34 @@ import {
 import { motion } from "framer-motion";
 import { formatPrice } from "../../../../shared/utils/helpers";
 import { useVendorStore } from "../../store/vendorStore";
-import { useOrderStore } from "../../../../shared/store/orderStore";
-import { useCommissionStore } from "../../../../shared/store/commissionStore";
+import { getAllOrders } from "../../services/adminService";
 
 const VendorAnalytics = () => {
   const navigate = useNavigate();
   const { vendors, initialize } = useVendorStore();
-  const { orders } = useOrderStore();
-  const { getVendorEarningsSummary } = useCommissionStore();
+  const [orders, setOrders] = useState([]);
 
   useEffect(() => {
-    initialize();
+    const bootstrap = async () => {
+      await initialize();
+      try {
+        const fetchedOrders = [];
+        let page = 1;
+        let pages = 1;
+        do {
+          const response = await getAllOrders({ page, limit: 200 });
+          const payload = response?.data ?? response;
+          const orderPage = Array.isArray(payload?.orders) ? payload.orders : [];
+          fetchedOrders.push(...orderPage);
+          pages = Math.max(Number(payload?.pages) || 1, 1);
+          page += 1;
+        } while (page <= pages);
+        setOrders(fetchedOrders);
+      } catch {
+        setOrders([]);
+      }
+    };
+    bootstrap();
   }, [initialize]);
 
   const isSameVendorId = (a, b) => String(a) === String(b);
@@ -40,7 +57,6 @@ const VendorAnalytics = () => {
           return false;
         });
 
-        const earningsSummary = getVendorEarningsSummary(vendor.id);
         const totalRevenue = vendorOrders.reduce((sum, order) => {
           const vendorItem = order.vendorItems?.find(
             (vi) => isSameVendorId(vi.vendorId, vendor.id)
@@ -52,13 +68,13 @@ const VendorAnalytics = () => {
           ...vendor,
           totalOrders: vendorOrders.length,
           totalRevenue,
-          totalEarnings: earningsSummary?.totalEarnings || 0,
-          pendingEarnings: earningsSummary?.pendingEarnings || 0,
-          paidEarnings: earningsSummary?.paidEarnings || 0,
+          totalEarnings: totalRevenue,
+          pendingEarnings: 0,
+          paidEarnings: 0,
         };
       })
       .sort((a, b) => b.totalRevenue - a.totalRevenue);
-  }, [approvedVendors, orders, getVendorEarningsSummary]);
+  }, [approvedVendors, orders]);
 
   const overallStats = useMemo(() => {
     return {

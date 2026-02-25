@@ -2,99 +2,112 @@ import { useState, useEffect } from "react";
 import { FiSearch, FiDollarSign } from "react-icons/fi";
 import { motion } from "framer-motion";
 import DataTable from "../../components/DataTable";
+import Pagination from "../../components/Pagination";
 import Badge from "../../../../shared/components/Badge";
 import AnimatedSelect from "../../components/AnimatedSelect";
 import { formatPrice } from "../../../../shared/utils/helpers";
 import { formatDateTime } from "../../utils/adminHelpers";
-import { getAllOrders } from "../../services/adminService";
+import { getCustomerTransactions } from "../../services/adminService";
 
 const Transactions = () => {
   const [transactions, setTransactions] = useState([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pagination, setPagination] = useState({
+    total: 0,
+    page: 1,
+    limit: 10,
+    pages: 0,
+  });
+  const itemsPerPage = 10;
 
   useEffect(() => {
-    const loadTransactions = async () => {
-      try {
-        const response = await getAllOrders({ page: 1, limit: 500 });
-        const orders = response?.data?.orders || [];
+    const timer = setTimeout(() => {
+      const loadTransactions = async () => {
+        try {
+          const response = await getCustomerTransactions({
+            page: currentPage,
+            limit: itemsPerPage,
+            search: searchQuery || undefined,
+            status: statusFilter,
+          });
+          const orders = response?.data?.orders || [];
 
-        const generatedTransactions = orders.flatMap((order) => {
-          const orderId = order.orderId || order._id;
-          const customerName =
-            order.userId?.name || order.shippingAddress?.name || "Guest";
-          const customerEmail =
-            order.userId?.email || order.shippingAddress?.email || "N/A";
-          const amount = Number(order.total) || 0;
-          const method = order.paymentMethod || "N/A";
-          const createdDate = order.createdAt || new Date().toISOString();
+          const generatedTransactions = orders.flatMap((order) => {
+            const orderId = order.orderId || order._id;
+            const customerName =
+              order.userId?.name || order.shippingAddress?.name || "Guest";
+            const customerEmail =
+              order.userId?.email || order.shippingAddress?.email || "N/A";
+            const amount = Number(order.total) || 0;
+            const method = order.paymentMethod || "N/A";
+            const createdDate = order.createdAt || new Date().toISOString();
 
-          const paymentStatusMap = {
-            paid: "completed",
-            pending: "pending",
-            failed: "failed",
-            refunded: "completed",
-          };
+            const paymentStatusMap = {
+              paid: "completed",
+              pending: "pending",
+              failed: "failed",
+              refunded: "completed",
+            };
 
-          const transactionsForOrder = [
-            {
-              id: `TXN-${orderId}-PAY`,
-              orderId,
-              customerName,
-              customerEmail,
-              amount,
-              type: "payment",
-              status:
-                paymentStatusMap[order.paymentStatus] ||
-                (order.status === "cancelled" ? "failed" : "completed"),
-              method,
-              date: createdDate,
-            },
-          ];
+            const transactionsForOrder = [
+              {
+                id: `TXN-${orderId}-PAY`,
+                orderId,
+                customerName,
+                customerEmail,
+                amount,
+                type: "payment",
+                status:
+                  paymentStatusMap[order.paymentStatus] ||
+                  (order.status === "cancelled" ? "failed" : "completed"),
+                method,
+                date: createdDate,
+              },
+            ];
 
-          if (order.paymentStatus === "refunded") {
-            transactionsForOrder.push({
-              id: `TXN-${orderId}-REF`,
-              orderId,
-              customerName,
-              customerEmail,
-              amount,
-              type: "refund",
-              status: "completed",
-              method: "Original Payment Method",
-              date: order.updatedAt || createdDate,
-            });
-          }
+            if (order.paymentStatus === "refunded") {
+              transactionsForOrder.push({
+                id: `TXN-${orderId}-REF`,
+                orderId,
+                customerName,
+                customerEmail,
+                amount,
+                type: "refund",
+                status: "completed",
+                method: "Original Payment Method",
+                date: order.updatedAt || createdDate,
+              });
+            }
 
-          return transactionsForOrder;
-        });
+            return transactionsForOrder;
+          });
 
-        setTransactions(generatedTransactions);
-      } catch (error) {
-        setTransactions([]);
-      }
-    };
+          setTransactions(generatedTransactions);
+          setPagination(
+            response?.data?.pagination || {
+              total: generatedTransactions.length,
+              page: 1,
+              limit: itemsPerPage,
+              pages: 1,
+            }
+          );
+        } catch (error) {
+          setTransactions([]);
+          setPagination({ total: 0, page: 1, limit: itemsPerPage, pages: 0 });
+        }
+      };
 
-    loadTransactions();
-  }, []);
+      loadTransactions();
+    }, 300);
 
-  const filteredTransactions = transactions.filter((txn) => {
-    const matchesSearch =
-      !searchQuery ||
-      String(txn.orderId || "")
-        .toLowerCase()
-        .includes(searchQuery.toLowerCase()) ||
-      String(txn.customerName || "")
-        .toLowerCase()
-        .includes(searchQuery.toLowerCase()) ||
-      String(txn.customerEmail || "")
-        .toLowerCase()
-        .includes(searchQuery.toLowerCase());
+    return () => clearTimeout(timer);
+  }, [currentPage, searchQuery, statusFilter]);
 
-    const matchesStatus = statusFilter === "all" || txn.status === statusFilter;
-
-    return matchesSearch && matchesStatus;
-  });
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, statusFilter]);
 
   const columns = [
     {
@@ -135,7 +148,8 @@ const Transactions = () => {
           <span
             className={`font-bold ${
               row.type === "refund" ? "text-red-600" : "text-green-600"
-            }`}>
+            }`}
+          >
             {row.type === "refund" ? "-" : "+"}
             {formatPrice(value)}
           </span>
@@ -152,7 +166,8 @@ const Transactions = () => {
             value === "payment"
               ? "bg-blue-100 text-blue-800"
               : "bg-orange-100 text-orange-800"
-          }`}>
+          }`}
+        >
           {value}
         </span>
       ),
@@ -180,11 +195,11 @@ const Transactions = () => {
     },
   ];
 
-  const totalRevenue = filteredTransactions
+  const totalRevenue = transactions
     .filter((t) => t.type === "payment" && t.status === "completed")
     .reduce((sum, t) => sum + t.amount, 0);
 
-  const totalRefunds = filteredTransactions
+  const totalRefunds = transactions
     .filter((t) => t.type === "refund" && t.status === "completed")
     .reduce((sum, t) => sum + t.amount, 0);
 
@@ -192,7 +207,8 @@ const Transactions = () => {
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="space-y-6">
+      className="space-y-6"
+    >
       <div className="lg:hidden">
         <h1 className="text-2xl sm:text-3xl font-bold text-gray-800 mb-2">
           Transactions
@@ -251,11 +267,14 @@ const Transactions = () => {
       </div>
 
       <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
-        <DataTable
-          data={filteredTransactions}
-          columns={columns}
-          pagination={true}
-          itemsPerPage={10}
+        <DataTable data={transactions} columns={columns} pagination={false} />
+        <Pagination
+          currentPage={pagination.page || currentPage}
+          totalPages={pagination.pages || 0}
+          totalItems={pagination.total || 0}
+          itemsPerPage={itemsPerPage}
+          onPageChange={setCurrentPage}
+          className="mt-6"
         />
       </div>
     </motion.div>

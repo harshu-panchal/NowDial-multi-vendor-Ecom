@@ -4,6 +4,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { FiSearch, FiClock, FiTrendingUp } from 'react-icons/fi';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getCatalogProducts } from '../../modules/UserApp/data/catalogData';
+import api from '../utils/api';
 
 const RECENT_SEARCHES_KEY = 'recent-searches';
 const MAX_RECENT_SEARCHES = 5;
@@ -48,31 +49,63 @@ const SearchBar = () => {
     localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(updated));
   };
 
-  // Get product suggestions based on query
-  const getProductSuggestions = (query) => {
-    if (!query.trim()) return [];
-    const lowerQuery = query.toLowerCase();
-    return getCatalogProducts()
-      .filter((product) => product.name.toLowerCase().includes(lowerQuery))
-      .slice(0, MAX_SUGGESTIONS)
-      .map((product) => ({
-        type: 'product',
-        id: product.id,
-        name: product.name,
-        image: product.image,
-        price: product.price,
-      }));
-  };
-
   // Update suggestions when query changes
   useEffect(() => {
-    if (searchQuery.trim()) {
-      const productSuggestions = getProductSuggestions(searchQuery);
-      setSuggestions(productSuggestions);
-    } else {
+    let cancelled = false;
+
+    const fetchSuggestions = async () => {
+      if (!searchQuery.trim()) {
+        setSuggestions([]);
+        setSelectedIndex(-1);
+        return;
+      }
+
+      try {
+        const response = await api.get('/products', {
+          params: { q: searchQuery.trim(), page: 1, limit: MAX_SUGGESTIONS, sort: 'newest' },
+        });
+        const payload = response?.data ?? response;
+        const products = Array.isArray(payload?.products) ? payload.products : [];
+        if (cancelled) return;
+
+        setSuggestions(
+          products.map((product) => ({
+            type: 'product',
+            id: product?._id || product?.id,
+            name: product?.name || '',
+            image: product?.image || product?.images?.[0] || '',
+            price: Number(product?.price) || 0,
+          }))
+        );
+      } catch {
+        if (cancelled) return;
+        const lowerQuery = searchQuery.toLowerCase();
+        const fallback = getCatalogProducts()
+          .filter((product) => String(product?.name || '').toLowerCase().includes(lowerQuery))
+          .slice(0, MAX_SUGGESTIONS)
+          .map((product) => ({
+            type: 'product',
+            id: product.id,
+            name: product.name,
+            image: product.image,
+            price: Number(product.price) || 0,
+          }));
+        setSuggestions(fallback);
+      }
+      setSelectedIndex(-1);
+    };
+
+    fetchSuggestions();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [searchQuery]);
+
+  useEffect(() => {
+    if (!searchQuery.trim()) {
       setSuggestions([]);
     }
-    setSelectedIndex(-1);
   }, [searchQuery]);
 
   // Handle outside click

@@ -3,8 +3,10 @@ import { FiArrowRight } from 'react-icons/fi';
 import VendorShowcaseCard from './VendorShowcaseCard';
 import { getApprovedVendors } from '../../data/catalogData';
 
-const FeaturedVendorsSection = () => {
-  const approvedVendors = getApprovedVendors();
+const FeaturedVendorsSection = ({ vendors = null }) => {
+  const approvedVendors = Array.isArray(vendors) && vendors.length > 0
+    ? vendors
+    : getApprovedVendors();
   const featuredVendors = approvedVendors
     .filter(v => v.isVerified)
     .sort((a, b) => (b.rating || 0) - (a.rating || 0))

@@ -23,6 +23,15 @@ const vendorSchema = new mongoose.Schema(
         reviewCount: { type: Number, default: 0 },
         totalSales: { type: Number, default: 0 },
         totalEarnings: { type: Number, default: 0 },
+        shippingEnabled: { type: Boolean, default: true },
+        freeShippingThreshold: { type: Number, default: 100, min: 0 },
+        defaultShippingRate: { type: Number, default: 5, min: 0 },
+        shippingMethods: {
+            type: [{ type: String, enum: ['standard', 'express', 'overnight'] }],
+            default: ['standard'],
+        },
+        handlingTime: { type: Number, default: 1, min: 0 },
+        processingTime: { type: Number, default: 1, min: 0 },
         address: {
             street: String,
             city: String,
@@ -47,6 +56,8 @@ const vendorSchema = new mongoose.Schema(
         resetOtp: { type: String, select: false },
         resetOtpExpiry: { type: Date, select: false },
         resetOtpVerified: { type: Boolean, default: false, select: false },
+        refreshTokenHash: { type: String, select: false },
+        refreshTokenExpiresAt: { type: Date, select: false },
         joinDate: { type: Date, default: Date.now },
     },
     { timestamps: true }

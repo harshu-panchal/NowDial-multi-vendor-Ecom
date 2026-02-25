@@ -13,7 +13,7 @@ import { motion } from "framer-motion";
 import Badge from "../../../../shared/components/Badge";
 import { formatPrice } from "../../../../shared/utils/helpers";
 import { useVendorAuthStore } from "../../store/vendorAuthStore";
-import { getVendorOrders } from "../../services/vendorService";
+import { getAllVendorOrders } from "../../services/vendorService";
 
 const OrderTracking = () => {
   const navigate = useNavigate();
@@ -33,8 +33,7 @@ const OrderTracking = () => {
     const fetchOrders = async () => {
       setIsLoading(true);
       try {
-        const res = await getVendorOrders({ limit: 200 });
-        const data = res?.data ?? res;
+        const data = await getAllVendorOrders({ limit: 100 });
         setVendorOrders(data?.orders ?? []);
       } catch {
         setVendorOrders([]);

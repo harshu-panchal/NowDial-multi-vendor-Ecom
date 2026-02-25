@@ -2,6 +2,7 @@ import asyncHandler from '../../../utils/asyncHandler.js';
 import ApiResponse from '../../../utils/ApiResponse.js';
 import ApiError from '../../../utils/ApiError.js';
 import Vendor from '../../../models/Vendor.model.js';
+import Commission from '../../../models/Commission.model.js';
 import { sendEmail } from '../../../services/email.service.js';
 import { createNotification } from '../../../services/notification.service.js';
 
@@ -12,9 +13,11 @@ const toApiVendor = (vendorDoc) => {
         ? vendorDoc.toObject()
         : (vendorDoc || {});
 
+    const normalizedId = vendor?._id ? String(vendor._id) : String(vendor?.id || '');
     const normalizedCommissionRate = Number(vendor.commissionRate);
     return {
         ...vendor,
+        id: normalizedId,
         commissionRate: Number.isFinite(normalizedCommissionRate)
             ? normalizedCommissionRate / 100
             : 0
@@ -118,4 +121,44 @@ export const updateCommissionRate = asyncHandler(async (req, res) => {
     const vendor = await Vendor.findByIdAndUpdate(req.params.id, { commissionRate: dbCommissionRate }, { new: true });
     if (!vendor) throw new ApiError(404, 'Vendor not found.');
     res.status(200).json(new ApiResponse(200, toApiVendor(vendor), 'Commission rate updated.'));
+});
+
+// GET /api/admin/vendors/:id/commissions
+export const getVendorCommissions = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { page = 1, limit = 20, status = 'all' } = req.query;
+
+    const vendor = await Vendor.findById(id).select('_id');
+    if (!vendor) throw new ApiError(404, 'Vendor not found.');
+
+    const numericPage = Math.max(parseInt(page, 10) || 1, 1);
+    const numericLimit = Math.max(parseInt(limit, 10) || 20, 1);
+    const skip = (numericPage - 1) * numericLimit;
+
+    const filter = { vendorId: vendor._id };
+    if (status && status !== 'all') {
+        filter.status = status;
+    }
+
+    const [commissions, total] = await Promise.all([
+        Commission.find(filter)
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(numericLimit)
+            .lean(),
+        Commission.countDocuments(filter),
+    ]);
+
+    res.status(200).json(
+        new ApiResponse(
+            200,
+            {
+                commissions,
+                total,
+                page: numericPage,
+                pages: Math.ceil(total / numericLimit),
+            },
+            'Vendor commissions fetched.'
+        )
+    );
 });

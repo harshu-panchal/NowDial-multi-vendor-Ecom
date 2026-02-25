@@ -8,6 +8,8 @@ import Brand from '../models/Brand.model.js';
 import Vendor from '../models/Vendor.model.js';
 import Coupon from '../models/Coupon.model.js';
 import Banner from '../models/Banner.model.js';
+import Campaign from '../models/Campaign.model.js';
+import { calculateVendorShippingForGroups } from '../services/vendorShipping.service.js';
 
 const router = Router();
 
@@ -26,6 +28,66 @@ const toPublicVendor = (vendorDoc) => {
     };
 };
 
+const normalizeVariantPart = (value) => String(value || '').trim().toLowerCase();
+const normalizeVariantKey = (key) => String(key || '').trim().toLowerCase();
+
+const toVariantPriceEntries = (variantPrices) => {
+    if (!variantPrices) return [];
+    if (variantPrices instanceof Map) return Array.from(variantPrices.entries());
+    if (typeof variantPrices === 'object') return Object.entries(variantPrices);
+    return [];
+};
+
+const resolveVariantPrice = (product, selectedVariant) => {
+    const basePrice = Number(product?.price);
+    if (!Number.isFinite(basePrice) || basePrice < 0) return 0;
+
+    const selectionEntries = Object.entries(selectedVariant || {})
+        .map(([axis, value]) => [String(axis || '').trim(), String(value || '').trim()])
+        .filter(([axis, value]) => axis && value);
+
+    const dynamicKey = selectionEntries.length
+        ? selectionEntries
+            .map(([axis, value]) => `${normalizeVariantPart(axis)}=${normalizeVariantPart(value)}`)
+            .sort()
+            .join('|')
+        : '';
+
+    const size = normalizeVariantPart(selectedVariant?.size);
+    const color = normalizeVariantPart(selectedVariant?.color);
+    const entries = toVariantPriceEntries(product?.variants?.prices);
+    if (!entries.length || (!dynamicKey && !size && !color)) return basePrice;
+
+    const candidateKeys = [
+        dynamicKey || null,
+        `${size}|${color}`,
+        `${size}-${color}`,
+        `${size}_${color}`,
+        `${size}:${color}`,
+        size && !color ? size : null,
+        color && !size ? color : null,
+    ].filter(Boolean);
+
+    for (const candidate of candidateKeys) {
+        if (!candidate) continue;
+        const exact = entries.find(([rawKey]) => String(rawKey).trim() === candidate);
+        if (exact) {
+            const price = Number(exact[1]);
+            if (Number.isFinite(price) && price >= 0) return price;
+        }
+
+        const normalized = entries.find(
+            ([rawKey]) => normalizeVariantKey(rawKey) === normalizeVariantKey(candidate)
+        );
+        if (normalized) {
+            const price = Number(normalized[1]);
+            if (Number.isFinite(price) && price >= 0) return price;
+        }
+    }
+
+    return basePrice;
+};
+
 // GET /api/products — list with filters
 const listProducts = asyncHandler(async (req, res) => {
     const {
@@ -38,9 +100,10 @@ const listProducts = asyncHandler(async (req, res) => {
         q,
         sort = 'newest',
         flashSale,
-        isNew,
+        isNewArrival,
         minPrice,
-        maxPrice
+        maxPrice,
+        minRating
     } = req.query;
     const skip = (page - 1) * limit;
     const filter = { isActive: true };
@@ -54,8 +117,9 @@ const listProducts = asyncHandler(async (req, res) => {
     if (brand) filter.brandId = brand;
     if (vendor) filter.vendorId = vendor;
     if (flashSale === 'true') filter.flashSale = true;
-    if (isNew === 'true') filter.isNew = true;
+    if (isNewArrival === 'true') filter.isNewArrival = true;
     if (minPrice || maxPrice) filter.price = { ...(minPrice && { $gte: Number(minPrice) }), ...(maxPrice && { $lte: Number(maxPrice) }) };
+    if (minRating) filter.rating = { $gte: Number(minRating) };
     const searchQuery = String(search || q || '').trim();
     if (searchQuery) filter.$text = { $search: searchQuery };
 
@@ -78,8 +142,60 @@ router.get('/flash-sale', asyncHandler(async (req, res) => {
 
 // GET /api/products/new-arrivals
 router.get('/new-arrivals', asyncHandler(async (req, res) => {
-    const products = await Product.find({ isActive: true, isNew: true }).sort({ createdAt: -1 }).limit(20);
-    res.status(200).json(new ApiResponse(200, products, 'New arrivals.'));
+    const {
+        page = 1,
+        limit = 20,
+        sort = 'newest',
+        search,
+        q,
+        minPrice,
+        maxPrice,
+        minRating,
+    } = req.query;
+
+    const numericPage = Math.max(Number(page) || 1, 1);
+    const numericLimit = Math.max(Number(limit) || 20, 1);
+    const skip = (numericPage - 1) * numericLimit;
+
+    const filter = { isActive: true, isNewArrival: true };
+    const searchQuery = String(search || q || '').trim();
+    if (searchQuery) filter.$text = { $search: searchQuery };
+    if (minPrice || maxPrice) {
+        filter.price = {
+            ...(minPrice ? { $gte: Number(minPrice) } : {}),
+            ...(maxPrice ? { $lte: Number(maxPrice) } : {}),
+        };
+    }
+    if (minRating) {
+        filter.rating = { $gte: Number(minRating) };
+    }
+
+    const sortMap = {
+        newest: { createdAt: -1 },
+        oldest: { createdAt: 1 },
+        'price-asc': { price: 1 },
+        'price-desc': { price: -1 },
+        popular: { reviewCount: -1 },
+        rating: { rating: -1 },
+    };
+
+    const [products, total] = await Promise.all([
+        Product.find(filter)
+            .populate('categoryId', 'name')
+            .populate('brandId', 'name')
+            .populate('vendorId', 'storeName')
+            .sort(sortMap[sort] || sortMap.newest)
+            .skip(skip)
+            .limit(numericLimit),
+        Product.countDocuments(filter),
+    ]);
+
+    res.status(200).json(new ApiResponse(200, {
+        products,
+        total,
+        page: numericPage,
+        pages: Math.ceil(total / numericLimit),
+    }, 'New arrivals fetched.'));
 }));
 
 // GET /api/products/popular
@@ -96,12 +212,14 @@ router.get('/similar/:id', asyncHandler(async (req, res) => {
     res.status(200).json(new ApiResponse(200, similar, 'Similar products.'));
 }));
 
-// GET /api/products/:id
-router.get('/:id', asyncHandler(async (req, res) => {
+const getProductDetail = asyncHandler(async (req, res) => {
     const product = await Product.findById(req.params.id).populate('categoryId', 'name').populate('brandId', 'name').populate('vendorId', 'storeName storeLogo rating');
     if (!product) throw new ApiError(404, 'Product not found.');
     res.status(200).json(new ApiResponse(200, product, 'Product detail.'));
-}));
+});
+
+// GET /api/products/:id
+router.get('/products/:id', getProductDetail);
 
 // GET /api/categories (public)
 router.get('/categories/all', asyncHandler(async (req, res) => {
@@ -150,7 +268,10 @@ router.get('/vendors/all', asyncHandler(async (req, res) => {
 
 // GET /api/vendors/:id (public)
 router.get('/vendors/:id', asyncHandler(async (req, res) => {
-    const vendor = await Vendor.findById(req.params.id).select('-password -otp -otpExpiry');
+    const vendor = await Vendor.findOne({
+        _id: req.params.id,
+        status: 'approved',
+    }).select('-password -otp -otpExpiry');
     if (!vendor) throw new ApiError(404, 'Vendor not found.');
     res.status(200).json(new ApiResponse(200, toPublicVendor(vendor), 'Vendor detail fetched.'));
 }));
@@ -170,6 +291,12 @@ router.get('/vendors/:id/products', asyncHandler(async (req, res) => {
         popular: { reviewCount: -1 },
         rating: { rating: -1 },
     };
+
+    const vendor = await Vendor.findOne({
+        _id: req.params.id,
+        status: 'approved',
+    }).select('_id');
+    if (!vendor) throw new ApiError(404, 'Vendor not found.');
 
     const filter = { isActive: true, vendorId: req.params.id };
     const products = await Product.find(filter)
@@ -191,8 +318,17 @@ router.get('/vendors/:id/products', asyncHandler(async (req, res) => {
 
 // POST /api/coupons/validate
 router.post('/coupons/validate', asyncHandler(async (req, res) => {
-    const { code, cartTotal } = req.body;
-    const coupon = await Coupon.findOne({ code: code?.toUpperCase(), isActive: true });
+    const rawCode = String(req.body?.code || '').trim();
+    const cartTotal = Number(req.body?.cartTotal);
+
+    if (!rawCode) {
+        throw new ApiError(400, 'Coupon code is required.');
+    }
+    if (!Number.isFinite(cartTotal) || cartTotal < 0) {
+        throw new ApiError(400, 'Cart total must be a valid non-negative number.');
+    }
+
+    const coupon = await Coupon.findOne({ code: rawCode.toUpperCase(), isActive: true });
     if (!coupon) throw new ApiError(400, 'Invalid coupon code.');
     if (coupon.startsAt && coupon.startsAt > Date.now()) throw new ApiError(400, 'Coupon is not active yet.');
     if (coupon.expiresAt && coupon.expiresAt < Date.now()) throw new ApiError(400, 'Coupon has expired.');
@@ -210,21 +346,175 @@ router.post('/coupons/validate', asyncHandler(async (req, res) => {
     res.status(200).json(new ApiResponse(200, { coupon: { code: coupon.code, type: coupon.type, value: coupon.value }, discount }, 'Coupon is valid.'));
 }));
 
+// GET /api/coupons/available
+router.get('/coupons/available', asyncHandler(async (req, res) => {
+    const now = new Date();
+    const coupons = await Coupon.find({
+        isActive: true,
+        $and: [
+            { $or: [{ startsAt: null }, { startsAt: { $exists: false } }, { startsAt: { $lte: now } }] },
+            { $or: [{ expiresAt: null }, { expiresAt: { $exists: false } }, { expiresAt: { $gte: now } }] }
+        ]
+    })
+        .select('code name type value minOrderValue maxDiscount expiresAt usageLimit usedCount')
+        .sort({ createdAt: -1 })
+        .limit(30)
+        .lean();
+
+    res.status(200).json(new ApiResponse(200, coupons, 'Available coupons fetched.'));
+}));
+
+// POST /api/shipping/estimate
+router.post('/shipping/estimate', asyncHandler(async (req, res) => {
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+    const shippingAddress = req.body?.shippingAddress || {};
+    const shippingOption = String(req.body?.shippingOption || 'standard');
+    const couponType = req.body?.couponType || null;
+
+    if (!items.length) {
+        return res.status(200).json(
+            new ApiResponse(200, { shipping: 0, byVendor: {} }, 'Shipping estimate calculated.')
+        );
+    }
+
+    const productIds = items
+        .map((item) => String(item?.productId || '').trim())
+        .filter((id) => /^[a-fA-F0-9]{24}$/.test(id));
+    if (!productIds.length) {
+        return res.status(200).json(
+            new ApiResponse(200, { shipping: 0, byVendor: {} }, 'Shipping estimate calculated.')
+        );
+    }
+
+    const products = await Product.find({ _id: { $in: productIds }, isActive: true })
+        .populate('vendorId', 'shippingEnabled defaultShippingRate freeShippingThreshold')
+        .select('_id vendorId price variants.prices')
+        .lean();
+
+    const productMap = new Map(products.map((product) => [String(product._id), product]));
+    const vendorMap = {};
+
+    items.forEach((item) => {
+        const product = productMap.get(String(item?.productId || ''));
+        if (!product || !product.vendorId) return;
+
+        const vendorId = String(product.vendorId._id || product.vendorId);
+        const quantity = Math.max(1, Number(item?.quantity || 1));
+        const price = Math.max(0, Number(resolveVariantPrice(product, item?.variant) || 0));
+        const subtotal = price * quantity;
+
+        if (!vendorMap[vendorId]) {
+            vendorMap[vendorId] = {
+                vendorId,
+                subtotal: 0,
+                shippingEnabled: product.vendorId.shippingEnabled !== false,
+                defaultShippingRate: product.vendorId.defaultShippingRate,
+                freeShippingThreshold: product.vendorId.freeShippingThreshold,
+            };
+        }
+        vendorMap[vendorId].subtotal += subtotal;
+    });
+
+    const { totalShipping, shippingByVendor } = await calculateVendorShippingForGroups({
+        vendorGroups: Object.values(vendorMap),
+        shippingAddress,
+        shippingOption,
+        couponType,
+    });
+
+    res.status(200).json(
+        new ApiResponse(200, { shipping: totalShipping, byVendor: shippingByVendor }, 'Shipping estimate calculated.')
+    );
+}));
+
 // GET /api/banners
 router.get('/banners', asyncHandler(async (req, res) => {
     const { type } = req.query;
-    const filter = { isActive: true };
+    const now = new Date();
+    const filter = {
+        isActive: true,
+        $and: [
+            { $or: [{ startDate: null }, { startDate: { $exists: false } }, { startDate: { $lte: now } }] },
+            { $or: [{ endDate: null }, { endDate: { $exists: false } }, { endDate: { $gte: now } }] }
+        ]
+    };
     if (type) filter.type = type;
     const banners = await Banner.find(filter).sort({ order: 1 });
     res.status(200).json(new ApiResponse(200, banners, 'Banners fetched.'));
 }));
 
+// GET /api/campaigns
+router.get('/campaigns', asyncHandler(async (req, res) => {
+    const { type, limit = 20 } = req.query;
+    const parsedLimit = Math.max(parseInt(limit, 10) || 20, 1);
+    const now = new Date();
+
+    const query = {
+        isActive: true,
+        $and: [
+            { $or: [{ startDate: null }, { startDate: { $exists: false } }, { startDate: { $lte: now } }] },
+            { $or: [{ endDate: null }, { endDate: { $exists: false } }, { endDate: { $gte: now } }] }
+        ]
+    };
+    if (type) query.type = type;
+
+    const campaigns = await Campaign.find(query)
+        .select('name slug type route discountType discountValue startDate endDate bannerConfig')
+        .sort({ createdAt: -1 })
+        .limit(parsedLimit);
+
+    res.status(200).json(new ApiResponse(200, campaigns, 'Campaigns fetched.'));
+}));
+
+// GET /api/campaigns/:slug
+router.get('/campaigns/:slug', asyncHandler(async (req, res) => {
+    const slug = String(req.params.slug || '').trim().toLowerCase();
+    if (!slug) throw new ApiError(400, 'Campaign slug is required.');
+
+    const campaign = await Campaign.findOne({ slug, isActive: true });
+    if (!campaign) throw new ApiError(404, 'Campaign not found.');
+
+    const now = new Date();
+    if (campaign.startDate && campaign.startDate > now) {
+        throw new ApiError(404, 'Campaign is not active yet.');
+    }
+    if (campaign.endDate && campaign.endDate < now) {
+        throw new ApiError(404, 'Campaign has ended.');
+    }
+
+    const productIds = Array.isArray(campaign.productIds)
+        ? campaign.productIds
+            .map((value) => String(value || '').trim())
+            .filter((value) => value && /^[a-fA-F0-9]{24}$/.test(value))
+        : [];
+
+    const products = await Product.find({
+        _id: { $in: productIds },
+        isActive: true
+    })
+        .populate('categoryId', 'name')
+        .populate('brandId', 'name')
+        .populate('vendorId', 'storeName')
+        .sort({ createdAt: -1 });
+
+    const payload = {
+        ...campaign.toObject(),
+        id: String(campaign._id),
+        products,
+    };
+
+    res.status(200).json(new ApiResponse(200, payload, 'Campaign fetched.'));
+}));
+
 // GET /api/orders/track/:id (public order tracking)
 router.get('/orders/track/:id', asyncHandler(async (req, res) => {
     const { default: Order } = await import('../models/Order.model.js');
-    const order = await Order.findOne({ orderId: req.params.id }).select('orderId status trackingNumber estimatedDelivery deliveredAt createdAt shippingAddress');
+    const order = await Order.findOne({ orderId: req.params.id }).select('orderId status trackingNumber estimatedDelivery deliveredAt createdAt updatedAt cancelledAt');
     if (!order) throw new ApiError(404, 'Order not found.');
     res.status(200).json(new ApiResponse(200, order, 'Order tracking info.'));
 }));
+
+// Legacy support: GET /api/:id (only ObjectId-like values to avoid swallowing unknown routes)
+router.get('/:id([a-fA-F0-9]{24})', getProductDetail);
 
 export default router;

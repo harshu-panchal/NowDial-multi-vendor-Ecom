@@ -1,10 +1,11 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { motion } from "framer-motion";
-import { categories } from "../../../../data/categories";
+import { categories as fallbackCategories } from "../../../../data/categories";
 import { FiPackage, FiShoppingBag, FiStar, FiTag, FiZap } from "react-icons/fi";
 import { IoShirtOutline, IoBagHandleOutline } from "react-icons/io5";
 import { LuFootprints } from "react-icons/lu";
+import { useCategoryStore } from "../../../../shared/store/categoryStore";
 
 // Map category names to icons
 const categoryIcons = {
@@ -17,6 +18,7 @@ const categoryIcons = {
 };
 
 const MobileCategoryIcons = () => {
+  const { categories: apiCategories, getRootCategories, initialize } = useCategoryStore();
   const [isScrolling, setIsScrolling] = useState(false);
   const scrollYRef = useRef(0);
   const location = useLocation();
@@ -70,6 +72,30 @@ const MobileCategoryIcons = () => {
   };
 
   const currentCategoryId = getCurrentCategoryId();
+
+  useEffect(() => {
+    initialize();
+  }, [initialize]);
+
+  const categories = useMemo(() => {
+    const roots = getRootCategories().filter((cat) => cat.isActive !== false);
+    if (!roots.length) return fallbackCategories;
+
+    return roots.map((cat) => {
+      const fallback = fallbackCategories.find(
+        (fc) =>
+          String(fc.id) === String(cat.id) ||
+          String(fc.name || "").toLowerCase() ===
+            String(cat.name || "").toLowerCase()
+      );
+
+      return {
+        ...(fallback || {}),
+        ...cat,
+        id: String(cat.id ?? cat._id ?? fallback?.id ?? ""),
+      };
+    });
+  }, [apiCategories, getRootCategories]);
 
   // Update line position when active category changes or container scrolls
   const updateLinePosition = (isScroll = false) => {
@@ -170,33 +196,33 @@ const MobileCategoryIcons = () => {
   }, [currentCategoryId]);
 
   // Category color mapping - matching the gradient colors
-  const categoryColors = {
-    1: {
+  const categoryColorsByName = {
+    clothing: {
       icon: "text-pink-500",
       text: "text-pink-600",
       indicator: "bg-pink-500",
     }, // Clothing - Pink
-    2: {
+    footwear: {
       icon: "text-amber-600",
       text: "text-amber-700",
       indicator: "bg-amber-600",
     }, // Footwear - Brown/Amber
-    3: {
+    bags: {
       icon: "text-orange-500",
       text: "text-orange-600",
       indicator: "bg-orange-500",
     }, // Bags - Orange
-    4: {
+    jewelry: {
       icon: "text-green-500",
       text: "text-green-600",
       indicator: "bg-green-500",
     }, // Jewelry - Green
-    5: {
+    accessories: {
       icon: "text-purple-500",
       text: "text-purple-600",
       indicator: "bg-purple-500",
     }, // Accessories - Purple
-    6: {
+    athletic: {
       icon: "text-blue-500",
       text: "text-blue-600",
       indicator: "bg-blue-500",
@@ -211,9 +237,10 @@ const MobileCategoryIcons = () => {
   };
 
   // Get color for active category
-  const getActiveColor = (categoryId) => {
+  const getActiveColor = (categoryName) => {
+    const colorKey = String(categoryName || "").trim().toLowerCase();
     return (
-      categoryColors[categoryId] || {
+      categoryColorsByName[colorKey] || {
         icon: "text-primary-500",
         text: "text-primary-500",
         indicator: "bg-primary-500",
@@ -235,7 +262,7 @@ const MobileCategoryIcons = () => {
           const isActive = isActiveCategory(category.id);
           const activeColors =
             currentCategoryId && String(currentCategoryId) === String(category.id)
-              ? getActiveColor(category.id)
+              ? getActiveColor(category.name)
               : null;
           return (
             <div

@@ -26,14 +26,36 @@ export const useVendorProductStore = create((set, get) => ({
     fetchProducts: async (params = {}) => {
         set({ isLoading: true });
         try {
-            const res = await getVendorProducts({ limit: 500, ...params });
-            // api.js interceptor unwraps response.data, so res = { products, total, page, pages }
-            const { products, total, page, pages } = res.data ?? res;
+            const { fetchAll = false, ...queryParams } = params || {};
+            const pageSize = Math.max(Number.parseInt(queryParams.limit, 10) || 100, 1);
+            let currentPage = Math.max(Number.parseInt(queryParams.page, 10) || 1, 1);
+            let totalPages = 1;
+            let latestPagination = {
+                total: 0,
+                page: currentPage,
+                pages: 1,
+            };
+            const allProducts = [];
+
+            do {
+                const res = await getVendorProducts({
+                    ...queryParams,
+                    page: currentPage,
+                    limit: pageSize,
+                });
+                // api.js interceptor unwraps response.data, so res = { products, total, page, pages }
+                const { products = [], total = 0, page = currentPage, pages = 1 } = res.data ?? res;
+                allProducts.push(...products);
+                latestPagination = { total, page, pages };
+                totalPages = fetchAll ? pages : currentPage;
+                currentPage += 1;
+            } while (fetchAll && currentPage <= totalPages);
+
             set({
-                products: products ?? [],
-                total: total ?? 0,
-                page: page ?? 1,
-                pages: pages ?? 1,
+                products: allProducts,
+                total: latestPagination.total ?? allProducts.length,
+                page: fetchAll ? 1 : (latestPagination.page ?? 1),
+                pages: fetchAll ? (latestPagination.pages ?? 1) : (latestPagination.pages ?? 1),
                 isLoading: false,
             });
         } catch {

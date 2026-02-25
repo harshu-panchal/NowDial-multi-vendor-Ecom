@@ -36,11 +36,9 @@ const PromoCodes = () => {
       const endMs = endDate ? new Date(endDate).getTime() : null;
 
       let status = 'inactive';
-      if (coupon.isActive) {
-        if (startMs && startMs > now) status = 'upcoming';
-        else if (endMs && endMs < now) status = 'expired';
-        else status = 'active';
-      }
+      if (endMs && endMs < now) status = 'expired';
+      else if (startMs && startMs > now) status = 'upcoming';
+      else if (coupon.isActive) status = 'active';
 
       return {
         ...coupon,
@@ -124,10 +122,18 @@ const PromoCodes = () => {
       render: (value, row) => (
         <div>
           <span className="text-sm font-medium text-gray-800">
-            {value === 'percentage' ? `${row.value}%` : formatCurrency(row.value)}
+            {value === 'percentage'
+              ? `${row.value}%`
+              : value === 'freeship'
+                ? 'Free Shipping'
+                : formatCurrency(row.value)}
           </span>
           <p className="text-xs text-gray-500">
-            {value === 'percentage' ? 'Percentage' : 'Fixed Amount'}
+            {value === 'percentage'
+              ? 'Percentage'
+              : value === 'freeship'
+                ? 'Shipping Waiver'
+                : 'Fixed Amount'}
           </p>
         </div>
       ),
@@ -145,7 +151,7 @@ const PromoCodes = () => {
       render: (value, row) => (
         <div>
           <span className="text-sm font-medium text-gray-800">
-            {row.usedCount} / {value === null || value === undefined ? '∞' : value}
+            {row.usedCount} / {value === null || value === undefined ? 'Unlimited' : value}
           </span>
           <div className="w-full bg-gray-200 rounded-full h-1.5 mt-1">
             <div
@@ -258,9 +264,17 @@ const PromoCodes = () => {
             headers={[
               { label: 'Code', accessor: (row) => row.code },
               { label: 'Type', accessor: (row) => row.type },
-              { label: 'Value', accessor: (row) => row.type === 'percentage' ? `${row.value}%` : formatCurrency(row.value) },
+              {
+                label: 'Value',
+                accessor: (row) =>
+                  row.type === 'percentage'
+                    ? `${row.value}%`
+                    : row.type === 'freeship'
+                      ? 'Free Shipping'
+                      : formatCurrency(row.value),
+              },
               { label: 'Min Purchase', accessor: (row) => formatCurrency(row.minPurchase) },
-              { label: 'Usage', accessor: (row) => `${row.usedCount} / ${row.usageLimit ?? '∞'}` },
+              { label: 'Usage', accessor: (row) => `${row.usedCount} / ${row.usageLimit ?? 'Unlimited'}` },
               { label: 'Status', accessor: (row) => row.status },
             ]}
             filename="promo-codes"
@@ -351,11 +365,12 @@ const PromoCodes = () => {
                     const usageLimitRaw = formData.get('usageLimit');
                     const usageLimit = usageLimitRaw === '' ? null : parseInt(usageLimitRaw, 10);
                     const maxDiscountRaw = formData.get('maxDiscount');
+                    const isFreeShip = type === 'freeship';
 
                     handleSave({
                       code: formData.get('code').toUpperCase(),
                       type,
-                      value: parseFloat(formData.get('value')),
+                      value: isFreeShip ? 0 : parseFloat(formData.get('value')),
                       minOrderValue: parseFloat(formData.get('minPurchase')) || 0,
                       maxDiscount: type === 'percentage' && maxDiscountRaw !== '' ? parseFloat(maxDiscountRaw) : null,
                       usageLimit: usageLimit === null || usageLimit < 0 ? null : usageLimit,
@@ -388,10 +403,18 @@ const PromoCodes = () => {
                       <AnimatedSelect
                         name="type"
                         value={editingCode.type || 'percentage'}
-                        onChange={(e) => setEditingCode({ ...editingCode, type: e.target.value })}
+                        onChange={(e) => {
+                          const nextType = e.target.value;
+                          setEditingCode({
+                            ...editingCode,
+                            type: nextType,
+                            ...(nextType === 'freeship' ? { value: 0, maxDiscount: '' } : {}),
+                          });
+                        }}
                         options={[
                           { value: 'percentage', label: 'Percentage' },
                           { value: 'fixed', label: 'Fixed Amount' },
+                          { value: 'freeship', label: 'Free Shipping' },
                         ]}
                         required
                       />
@@ -401,12 +424,14 @@ const PromoCodes = () => {
                       <input
                         type="number"
                         name="value"
-                        defaultValue={editingCode.value || ''}
-                        placeholder={editingCode.type === 'fixed' ? '50.00' : '20'}
+                        defaultValue={editingCode.type === 'freeship' ? 0 : (editingCode.value || '')}
+                        placeholder={editingCode.type === 'fixed' ? '50.00' : editingCode.type === 'freeship' ? '0 (auto)' : '20'}
                         required
                         min="0"
                         step={editingCode.type === 'fixed' ? '0.01' : '1'}
                         max={editingCode.type === 'percentage' ? '100' : ''}
+                        readOnly={editingCode.type === 'freeship'}
+                        disabled={editingCode.type === 'freeship'}
                         className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                       />
                     </div>
@@ -430,9 +455,11 @@ const PromoCodes = () => {
                       <input
                         type="number"
                         name="maxDiscount"
-                        defaultValue={editingCode.maxDiscount ?? ''}
+                        defaultValue={editingCode.type === 'freeship' ? '' : (editingCode.maxDiscount ?? '')}
                         min="0"
                         step="0.01"
+                        readOnly={editingCode.type === 'freeship'}
+                        disabled={editingCode.type === 'freeship'}
                         className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                       />
                     </div>
@@ -458,7 +485,6 @@ const PromoCodes = () => {
                         type="datetime-local"
                         name="startDate"
                         defaultValue={editingCode.startDate ? new Date(editingCode.startDate).toISOString().slice(0, 16) : ''}
-                        required
                         className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                       />
                     </div>
@@ -468,7 +494,6 @@ const PromoCodes = () => {
                         type="datetime-local"
                         name="endDate"
                         defaultValue={editingCode.endDate ? new Date(editingCode.endDate).toISOString().slice(0, 16) : ''}
-                        required
                         className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                       />
                     </div>
@@ -531,4 +556,5 @@ const PromoCodes = () => {
 };
 
 export default PromoCodes;
+
 

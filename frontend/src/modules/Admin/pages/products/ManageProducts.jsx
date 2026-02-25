@@ -39,10 +39,21 @@ const ManageProducts = () => {
 
   const loadProducts = async () => {
     try {
-      const response = await getAllProducts();
-      const products = Array.isArray(response.data)
-        ? response.data
-        : (response.data?.products || []);
+      let currentPage = 1;
+      let totalPages = 1;
+      const products = [];
+
+      do {
+        const response = await getAllProducts({ page: currentPage, limit: 100 });
+        const pageProducts = Array.isArray(response.data)
+          ? response.data
+          : (response.data?.products || []);
+        products.push(...pageProducts);
+
+        totalPages = Number(response.data?.pages || 1);
+        currentPage += 1;
+      } while (currentPage <= totalPages);
+
       const normalizedProducts = products.map(p => ({
         ...p,
         id: p._id, // Map backend _id to frontend id

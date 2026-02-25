@@ -1,11 +1,11 @@
-import { useState, useRef, useEffect } from "react";
+﻿import { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
 import { FiTrash2, FiMinus, FiPlus, FiHeart, FiAlertCircle } from "react-icons/fi";
 import { toast } from "react-hot-toast";
 import { useCartStore } from "../../store/useStore";
 import { useWishlistStore } from "../../store/wishlistStore";
 import { formatPrice } from "../../utils/helpers";
-import { getProductById } from "../../../data/products";
+import { formatVariantLabel } from "../../utils/variant";
 import useSwipeGesture from "../../../modules/UserApp/hooks/useSwipeGesture";
 
 const SwipeableCartItem = ({ item, index }) => {
@@ -22,53 +22,48 @@ const SwipeableCartItem = ({ item, index }) => {
         setHasAnimated(true);
     }, []);
 
-    const getProductStock = (id) => {
-        const product = getProductById(id);
-        return product ? product.stockQuantity : null;
+    const getProductStock = () => Number(item?.stockQuantity);
+
+    const isMaxQuantity = (quantity) => {
+        const availableStock = Number(item?.stockQuantity);
+        return Number.isFinite(availableStock) ? quantity >= availableStock : false;
     };
 
-    const isMaxQuantity = (id, quantity) => {
-        const product = getProductById(id);
-        return product ? quantity >= product.stockQuantity : false;
-    };
+    const isLowStock = () => String(item?.stock || "") === "low_stock";
 
-    const isLowStock = (id) => {
-        const product = getProductById(id);
-        return product ? product.stock === "low_stock" : false;
-    };
-
-    const handleQuantityChange = (id, currentQuantity, change) => {
-        const product = getProductById(id);
+    const handleQuantityChange = (id, currentQuantity, change, variant) => {
         const newQuantity = currentQuantity + change;
+        const availableStock = Number(item?.stockQuantity);
 
         if (newQuantity <= 0) {
-            removeItem(id);
+            removeItem(id, variant);
             return;
         }
 
-        if (product && newQuantity > product.stockQuantity) {
-            toast.error(`Only ${product.stockQuantity} items available in stock`);
+        if (Number.isFinite(availableStock) && newQuantity > availableStock) {
+            toast.error(`Only ${availableStock} items available in stock`);
             return;
         }
 
-        updateQuantity(id, newQuantity);
+        updateQuantity(id, newQuantity, variant);
     };
 
     const handleSaveForLater = (item) => {
-        addToWishlist({
+        const addedToWishlist = addToWishlist({
             id: item.id,
             name: item.name,
             price: item.price,
             image: item.image,
         });
-        removeItem(item.id);
+        if (!addedToWishlist) return;
+        removeItem(item.id, item.variant);
         toast.success("Saved for later!");
     };
 
     const handleSwipeRight = () => {
         setIsDeleted(true);
         deletedItemRef.current = { ...item };
-        removeItem(item.id);
+        removeItem(item.id, item.variant);
         toast.success("Item removed", {
             duration: 3000,
             action: {
@@ -141,12 +136,17 @@ const SwipeableCartItem = ({ item, index }) => {
                     <p className="text-sm font-bold text-primary-600 mb-2">
                         {formatPrice(item.price)}
                     </p>
+                    {formatVariantLabel(item?.variant) && (
+                        <p className="text-xs text-gray-500 mb-2">
+                            {formatVariantLabel(item?.variant)}
+                        </p>
+                    )}
 
                     {/* Stock Warning */}
-                    {isLowStock(item.id) && (
+                    {isLowStock() && (
                         <div className="flex items-center gap-1 text-xs text-orange-600 mb-2">
                             <FiAlertCircle className="text-xs" />
-                            <span>Only {getProductStock(item.id)} left!</span>
+                            <span>Only {getProductStock()} left!</span>
                         </div>
                     )}
 
@@ -157,7 +157,7 @@ const SwipeableCartItem = ({ item, index }) => {
                             onClick={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
-                                handleQuantityChange(item.id, item.quantity, -1);
+                                handleQuantityChange(item.id, item.quantity, -1, item.variant);
                             }}
                             className="w-8 h-8 flex items-center justify-center rounded-lg bg-white border border-gray-300 hover:bg-gray-50 transition-colors">
                             <FiMinus className="text-xs text-gray-600" />
@@ -176,10 +176,10 @@ const SwipeableCartItem = ({ item, index }) => {
                             onClick={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
-                                handleQuantityChange(item.id, item.quantity, 1);
+                                handleQuantityChange(item.id, item.quantity, 1, item.variant);
                             }}
-                            disabled={isMaxQuantity(item.id, item.quantity)}
-                            className={`w-8 h-8 flex items-center justify-center rounded-lg border transition-colors ${isMaxQuantity(item.id, item.quantity)
+                            disabled={isMaxQuantity(item.quantity)}
+                            className={`w-8 h-8 flex items-center justify-center rounded-lg border transition-colors ${isMaxQuantity(item.quantity)
                                 ? "bg-gray-100 border-gray-200 cursor-not-allowed opacity-50"
                                 : "bg-white border-gray-300 hover:bg-gray-50"
                                 }`}>
@@ -190,7 +190,7 @@ const SwipeableCartItem = ({ item, index }) => {
                             onClick={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
-                                removeItem(item.id);
+                                removeItem(item.id, item.variant);
                             }}
                             className="ml-auto p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors">
                             <FiTrash2 className="text-sm" />
@@ -215,3 +215,6 @@ const SwipeableCartItem = ({ item, index }) => {
 };
 
 export default SwipeableCartItem;
+
+
+

@@ -79,3 +79,24 @@ export const uploadLocalFileToCloudinaryAndCleanupWithType = async (
 export const deleteFromCloudinary = async (publicId) => {
     return cloudinary.uploader.destroy(publicId);
 };
+
+/**
+ * Best-effort local file cleanup helper.
+ */
+export const cleanupLocalFile = async (localFilePath) => {
+    if (!localFilePath) return false;
+    try {
+        await fs.unlink(localFilePath);
+        return true;
+    } catch {
+        return false;
+    }
+};
+
+/**
+ * Best-effort cleanup for multiple local files.
+ */
+export const cleanupLocalFiles = async (paths = []) => {
+    const uniquePaths = [...new Set((paths || []).filter(Boolean))];
+    await Promise.allSettled(uniquePaths.map((filePath) => cleanupLocalFile(filePath)));
+};

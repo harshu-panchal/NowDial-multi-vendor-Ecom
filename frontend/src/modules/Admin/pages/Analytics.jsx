@@ -8,6 +8,28 @@ import ExportButton from '../components/ExportButton';
 import { formatCurrency } from '../utils/adminHelpers';
 import { getDashboardStats, getRevenueData } from '../services/adminService';
 
+const getRangeForPeriod = (period) => {
+  const now = new Date();
+  const endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+  let startDate = new Date(endDate);
+
+  if (period === 'today') {
+    startDate = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate(), 0, 0, 0, 0);
+  } else if (period === 'week') {
+    startDate.setDate(endDate.getDate() - 6);
+  } else if (period === 'month') {
+    startDate.setDate(endDate.getDate() - 29);
+  } else {
+    startDate.setFullYear(endDate.getFullYear() - 1);
+    startDate.setDate(endDate.getDate() + 1);
+  }
+
+  return {
+    startDate: startDate.toISOString(),
+    endDate: endDate.toISOString(),
+  };
+};
+
 const Analytics = () => {
   const [period, setPeriod] = useState('month');
   const [isLoading, setIsLoading] = useState(true);
@@ -36,9 +58,10 @@ const Analytics = () => {
       setIsLoading(true);
       try {
         const apiPeriod = mapUiPeriodToApiPeriod(period);
+        const range = getRangeForPeriod(period);
         const [statsRes, revenueRes] = await Promise.allSettled([
           getDashboardStats(),
-          getRevenueData(apiPeriod),
+          getRevenueData(apiPeriod, range),
         ]);
 
         if (mounted && statsRes.status === 'fulfilled') {

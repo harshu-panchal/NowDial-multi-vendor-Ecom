@@ -8,7 +8,7 @@ import AnimatedSelect from "../../Admin/components/AnimatedSelect";
 import { useVendorAuthStore } from "../store/vendorAuthStore";
 import { useVendorProductStore } from "../store/vendorProductStore";
 import {
-  getVendorReviews,
+  getAllVendorReviews,
   updateVendorReviewStatus,
   addVendorReviewResponse,
 } from "../services/vendorService";
@@ -36,8 +36,8 @@ const ProductReviews = () => {
     const fetchData = async () => {
       setIsLoading(true);
       try {
-        await fetchProducts({ limit: 500 });
-        const res = await getVendorReviews({ limit: 500 });
+        await fetchProducts({ fetchAll: true, limit: 200 });
+        const res = await getAllVendorReviews({ limit: 100 });
         const payload = res?.data ?? res;
         setReviews(payload?.reviews ?? []);
       } catch {
@@ -92,6 +92,9 @@ const ProductReviews = () => {
       setReviews((prev) =>
         prev.map((review) => (review.id === reviewId ? updated : review))
       );
+      setSelectedReview((prev) =>
+        prev && prev.id === reviewId ? updated : prev
+      );
     } catch {
       return;
     }
@@ -107,6 +110,9 @@ const ProductReviews = () => {
       const updated = res?.data ?? res;
       setReviews((prev) =>
         prev.map((review) => (review.id === reviewId ? updated : review))
+      );
+      setSelectedReview((prev) =>
+        prev && prev.id === reviewId ? updated : prev
       );
     } catch {
       return;
@@ -212,6 +218,14 @@ const ProductReviews = () => {
               className="p-2 text-yellow-600 hover:bg-yellow-50 rounded-lg transition-colors"
               title="Hide Review">
               <FiX />
+            </button>
+          )}
+          {row.status !== "approved" && (
+            <button
+              onClick={() => handleModerate(row.id, "approve")}
+              className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+              title="Approve Review">
+              <FiStar />
             </button>
           )}
         </div>
@@ -439,6 +453,23 @@ const ProductReviews = () => {
                   </button>
                 </div>
               )}
+
+              <div className="flex items-center gap-2">
+                {selectedReview.status !== "approved" && (
+                  <button
+                    onClick={() => handleModerate(selectedReview.id, "approve")}
+                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-semibold text-sm">
+                    Approve Review
+                  </button>
+                )}
+                {selectedReview.status !== "hidden" && (
+                  <button
+                    onClick={() => handleModerate(selectedReview.id, "hide")}
+                    className="px-4 py-2 bg-yellow-100 text-yellow-700 rounded-lg hover:bg-yellow-200 transition-colors font-semibold text-sm">
+                    Hide Review
+                  </button>
+                )}
+              </div>
 
               <div className="flex justify-end pt-4 border-t border-gray-200 gap-2">
                 <button

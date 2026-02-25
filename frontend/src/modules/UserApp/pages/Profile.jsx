@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
-import { FiUser, FiMail, FiPhone, FiLock, FiEye, FiEyeOff, FiSave, FiCamera, FiArrowLeft, FiPackage, FiMapPin, FiLogOut, FiChevronRight } from 'react-icons/fi';
+import { FiUser, FiMail, FiPhone, FiLock, FiEye, FiEyeOff, FiSave, FiCamera, FiArrowLeft, FiPackage, FiMapPin, FiLogOut, FiChevronRight, FiBell } from 'react-icons/fi';
 import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
@@ -9,8 +9,8 @@ import { useAuthStore } from '../../../shared/store/authStore';
 import { isValidEmail, isValidPhone } from '../../../shared/utils/helpers';
 import toast from 'react-hot-toast';
 import PageTransition from '../../../shared/components/PageTransition';
-import ProtectedRoute from '../../../shared/components/Auth/ProtectedRoute';
 import PasswordStrengthMeter from '../components/Mobile/PasswordStrengthMeter';
+import { useUserNotificationStore } from '../store/userNotificationStore';
 
 const MobileProfile = () => {
   const navigate = useNavigate();
@@ -23,6 +23,8 @@ const MobileProfile = () => {
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const unreadNotificationCount = useUserNotificationStore((state) => state.unreadCount);
+  const ensureNotificationHydrated = useUserNotificationStore((state) => state.ensureHydrated);
 
   const {
     register: registerPersonal,
@@ -68,6 +70,10 @@ const MobileProfile = () => {
       phone: user?.phone || '',
     });
   }, [user, resetPersonal]);
+
+  useEffect(() => {
+    ensureNotificationHydrated();
+  }, [ensureNotificationHydrated]);
 
   const onPersonalSubmit = async (data) => {
     try {
@@ -131,13 +137,21 @@ const MobileProfile = () => {
     { id: 'personal', label: 'Personal Information', icon: FiUser, color: 'text-blue-600', bg: 'bg-blue-50' },
     { id: 'orders', label: 'My Orders', icon: FiPackage, color: 'text-orange-600', bg: 'bg-orange-50', link: '/orders' },
     { id: 'addresses', label: 'My Addresses', icon: FiMapPin, color: 'text-green-600', bg: 'bg-green-50', link: '/addresses' },
+    {
+      id: 'notifications',
+      label: 'Notifications',
+      icon: FiBell,
+      color: 'text-indigo-600',
+      bg: 'bg-indigo-50',
+      link: '/notifications',
+      badge: unreadNotificationCount > 0 ? unreadNotificationCount : null,
+    },
     { id: 'password', label: 'Change Password', icon: FiLock, color: 'text-purple-600', bg: 'bg-purple-50' },
   ];
 
   return (
-    <ProtectedRoute>
-      <PageTransition>
-        <MobileLayout showBottomNav={true} showCartBar={true}>
+    <PageTransition>
+      <MobileLayout showBottomNav={true} showCartBar={true}>
           <div className="w-full pb-24 lg:pb-12 max-w-7xl mx-auto min-h-screen bg-gray-50">
             {/* Desktop Header */}
             <div className="hidden lg:block px-4 py-8">
@@ -249,7 +263,14 @@ const MobileProfile = () => {
                                 </div>
                                 <span className="font-bold text-gray-700 text-sm">{option.label}</span>
                               </div>
-                              <FiChevronRight className="text-gray-400" />
+                              <div className="flex items-center gap-2">
+                                {option.badge ? (
+                                  <span className="min-w-[20px] h-5 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
+                                    {option.badge > 99 ? '99+' : option.badge}
+                                  </span>
+                                ) : null}
+                                <FiChevronRight className="text-gray-400" />
+                              </div>
                             </Link>
                           ) : (
                             <button
@@ -263,7 +284,14 @@ const MobileProfile = () => {
                                 </div>
                                 <span className="font-bold text-gray-700 text-sm">{option.label}</span>
                               </div>
-                              <FiChevronRight className="text-gray-400" />
+                              <div className="flex items-center gap-2">
+                                {option.badge ? (
+                                  <span className="min-w-[20px] h-5 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
+                                    {option.badge > 99 ? '99+' : option.badge}
+                                  </span>
+                                ) : null}
+                                <FiChevronRight className="text-gray-400" />
+                              </div>
                             </button>
                           )
                         ))}
@@ -322,7 +350,7 @@ const MobileProfile = () => {
                       </div>
                       <div>
                         <p className="text-gray-600 text-sm mb-1">Profile Picture</p>
-                        <p className="text-xs text-gray-500">JPG, PNG or GIF. Max size 2MB</p>
+                        <p className="text-xs text-gray-500">JPG, PNG or GIF. Max size 5MB</p>
                       </div>
                     </div>
 
@@ -577,9 +605,8 @@ const MobileProfile = () => {
               </div>
             </div>
           </div>
-        </MobileLayout>
-      </PageTransition>
-    </ProtectedRoute>
+      </MobileLayout>
+    </PageTransition>
   );
 };
 

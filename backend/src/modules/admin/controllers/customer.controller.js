@@ -218,3 +218,216 @@ export const deleteCustomerAddress = asyncHandler(async (req, res) => {
         new ApiResponse(200, null, 'Address deleted successfully')
     );
 });
+
+/**
+ * @desc    Get customer orders (paginated)
+ * @route   GET /api/admin/customers/:id/orders
+ * @access  Private (Admin)
+ */
+export const getCustomerOrders = asyncHandler(async (req, res) => {
+    const { page = 1, limit = 20, status } = req.query;
+    const numericPage = Number(page) || 1;
+    const numericLimit = Number(limit) || 20;
+    const skip = (numericPage - 1) * numericLimit;
+
+    const customer = await User.findOne({ _id: req.params.id, role: 'customer' }).select('_id');
+    if (!customer) {
+        throw new ApiError(404, 'Customer not found');
+    }
+
+    const filter = {
+        userId: customer._id,
+        isDeleted: { $ne: true },
+    };
+
+    if (status) {
+        filter.status = status;
+    }
+
+    const [orders, total] = await Promise.all([
+        Order.find(filter)
+            .populate('userId', 'name email phone')
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(numericLimit)
+            .lean(),
+        Order.countDocuments(filter),
+    ]);
+
+    res.status(200).json(
+        new ApiResponse(200, {
+            orders,
+            pagination: {
+                total,
+                page: numericPage,
+                limit: numericLimit,
+                pages: Math.ceil(total / numericLimit),
+            },
+        }, 'Customer orders fetched successfully')
+    );
+});
+
+/**
+ * @desc    Get customer transactions (paginated)
+ * @route   GET /api/admin/customers/transactions
+ * @access  Private (Admin)
+ */
+export const getCustomerTransactions = asyncHandler(async (req, res) => {
+    const { page = 1, limit = 20, search, status = 'all' } = req.query;
+    const numericPage = Number(page) || 1;
+    const numericLimit = Number(limit) || 20;
+    const skip = (numericPage - 1) * numericLimit;
+
+    const filter = {
+        userId: { $ne: null },
+        isDeleted: { $ne: true },
+    };
+
+    if (status === 'completed') {
+        filter.$or = [{ paymentStatus: 'paid' }, { paymentStatus: 'refunded' }];
+    } else if (status === 'pending') {
+        filter.paymentStatus = 'pending';
+        filter.status = { $ne: 'cancelled' };
+    } else if (status === 'failed') {
+        filter.$or = [{ paymentStatus: 'failed' }, { status: 'cancelled' }];
+    }
+
+    if (search) {
+        const regex = new RegExp(search, 'i');
+        const matchedUsers = await User.find({
+            role: 'customer',
+            $or: [{ name: regex }, { email: regex }, { phone: regex }],
+        }).select('_id').limit(300).lean();
+        const matchedUserIds = matchedUsers.map((u) => u._id);
+
+        const searchOr = [
+            { orderId: regex },
+            { 'shippingAddress.name': regex },
+            { 'shippingAddress.email': regex },
+        ];
+
+        if (matchedUserIds.length > 0) {
+            searchOr.push({ userId: { $in: matchedUserIds } });
+        }
+
+        if (filter.$or) {
+            filter.$and = [{ $or: filter.$or }, { $or: searchOr }];
+            delete filter.$or;
+        } else {
+            filter.$or = searchOr;
+        }
+    }
+
+    const [orders, total] = await Promise.all([
+        Order.find(filter)
+            .populate('userId', 'name email')
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(numericLimit)
+            .lean(),
+        Order.countDocuments(filter),
+    ]);
+
+    res.status(200).json(
+        new ApiResponse(200, {
+            orders,
+            pagination: {
+                total,
+                page: numericPage,
+                limit: numericLimit,
+                pages: Math.ceil(total / numericLimit),
+            },
+        }, 'Customer transactions fetched successfully')
+    );
+});
+
+/**
+ * @desc    Get customer addresses (paginated)
+ * @route   GET /api/admin/customers/addresses
+ * @access  Private (Admin)
+ */
+export const getCustomerAddresses = asyncHandler(async (req, res) => {
+    const { page = 1, limit = 20, search } = req.query;
+    const numericPage = Number(page) || 1;
+    const numericLimit = Number(limit) || 20;
+    const skip = (numericPage - 1) * numericLimit;
+
+    const matchSearch = search
+        ? {
+            $or: [
+                { 'customer.name': { $regex: search, $options: 'i' } },
+                { 'customer.email': { $regex: search, $options: 'i' } },
+                { address: { $regex: search, $options: 'i' } },
+                { city: { $regex: search, $options: 'i' } },
+            ],
+        }
+        : null;
+
+    const basePipeline = [
+        {
+            $lookup: {
+                from: 'users',
+                localField: 'userId',
+                foreignField: '_id',
+                as: 'customer',
+            },
+        },
+        { $unwind: '$customer' },
+        { $match: { 'customer.role': 'customer' } },
+    ];
+
+    if (matchSearch) {
+        basePipeline.push({ $match: matchSearch });
+    }
+
+    const dataPipeline = [
+        ...basePipeline,
+        { $sort: { isDefault: -1, createdAt: -1 } },
+        { $skip: skip },
+        { $limit: numericLimit },
+        {
+            $project: {
+                _id: 1,
+                userId: 1,
+                name: 1,
+                fullName: 1,
+                phone: 1,
+                address: 1,
+                city: 1,
+                state: 1,
+                zipCode: 1,
+                country: 1,
+                isDefault: 1,
+                createdAt: 1,
+                updatedAt: 1,
+                customerId: '$customer._id',
+                customerName: '$customer.name',
+                customerEmail: '$customer.email',
+            },
+        },
+    ];
+
+    const countPipeline = [
+        ...basePipeline,
+        { $count: 'total' },
+    ];
+
+    const [addresses, countRows] = await Promise.all([
+        Address.aggregate(dataPipeline),
+        Address.aggregate(countPipeline),
+    ]);
+
+    const total = countRows?.[0]?.total || 0;
+
+    res.status(200).json(
+        new ApiResponse(200, {
+            addresses,
+            pagination: {
+                total,
+                page: numericPage,
+                limit: numericLimit,
+                pages: Math.ceil(total / numericLimit),
+            },
+        }, 'Customer addresses fetched successfully')
+    );
+});

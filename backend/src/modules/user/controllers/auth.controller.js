@@ -5,7 +5,31 @@ import User from '../../../models/User.model.js';
 import { generateTokens } from '../../../utils/generateToken.js';
 import { sendOTP } from '../../../services/otp.service.js';
 import { sendEmail } from '../../../services/email.service.js';
-import { uploadLocalFileToCloudinaryAndCleanup } from '../../../services/upload.service.js';
+import {
+    uploadLocalFileToCloudinaryAndCleanup,
+    deleteFromCloudinary,
+    cleanupLocalFiles,
+} from '../../../services/upload.service.js';
+import {
+    clearRefreshSession,
+    decodeRefreshTokenOrThrow,
+    persistRefreshSession,
+    rotateRefreshSession,
+} from '../../../services/refreshToken.service.js';
+
+const extractCloudinaryPublicId = (url = '') => {
+    const raw = String(url || '').trim();
+    if (!raw || !raw.includes('/upload/')) return null;
+    try {
+        const afterUpload = raw.split('/upload/')[1] || '';
+        const withoutTransform = afterUpload.includes('/') ? afterUpload.substring(afterUpload.indexOf('/') + 1) : afterUpload;
+        const cleaned = withoutTransform.replace(/^v\d+\//, '');
+        const withoutExtension = cleaned.replace(/\.[^/.]+$/, '');
+        return withoutExtension || null;
+    } catch {
+        return null;
+    }
+};
 
 // POST /api/user/auth/register
 export const register = asyncHandler(async (req, res) => {
@@ -43,6 +67,7 @@ export const verifyOTP = asyncHandler(async (req, res) => {
     await user.save();
 
     const { accessToken, refreshToken } = generateTokens({ id: user._id, role: 'customer', email: user.email });
+    await persistRefreshSession(user, refreshToken);
     res.status(200).json(new ApiResponse(200, { accessToken, refreshToken, user: { id: user._id, name: user.name, email: user.email } }, 'Email verified successfully.'));
 });
 
@@ -63,7 +88,46 @@ export const login = asyncHandler(async (req, res) => {
     if (!isMatch) throw new ApiError(401, 'Invalid email or password.');
 
     const { accessToken, refreshToken } = generateTokens({ id: user._id, role: 'customer', email: user.email });
+    await persistRefreshSession(user, refreshToken);
     res.status(200).json(new ApiResponse(200, { accessToken, refreshToken, user: { id: user._id, name: user.name, email: user.email, avatar: user.avatar } }, 'Login successful.'));
+});
+
+// POST /api/user/auth/refresh
+export const refresh = asyncHandler(async (req, res) => {
+    const { refreshToken } = req.body;
+    const decoded = decodeRefreshTokenOrThrow(refreshToken);
+    const user = await User.findById(decoded.id).select('+refreshTokenHash +refreshTokenExpiresAt isActive isVerified');
+
+    if (!user) throw new ApiError(401, 'Invalid refresh token.');
+    if (!user.isActive) throw new ApiError(403, 'Your account has been deactivated.');
+    if (!user.isVerified) throw new ApiError(403, 'Please verify your email first.');
+
+    const tokens = await rotateRefreshSession(
+        user,
+        { id: user._id, role: 'customer', email: user.email },
+        refreshToken
+    );
+
+    return res.status(200).json(
+        new ApiResponse(200, tokens, 'Session refreshed successfully.')
+    );
+});
+
+// POST /api/user/auth/logout
+export const logout = asyncHandler(async (req, res) => {
+    const { refreshToken } = req.body;
+    if (refreshToken) {
+        try {
+            const decoded = decodeRefreshTokenOrThrow(refreshToken);
+            const user = await User.findById(decoded.id).select('+refreshTokenHash +refreshTokenExpiresAt');
+            if (user?.refreshTokenHash) {
+                await clearRefreshSession(user);
+            }
+        } catch {
+            // Keep logout idempotent.
+        }
+    }
+    return res.status(200).json(new ApiResponse(200, null, 'Logged out successfully.'));
 });
 
 // POST /api/user/auth/resend-otp
@@ -149,6 +213,8 @@ export const resetPassword = asyncHandler(async (req, res) => {
     user.resetOtp = undefined;
     user.resetOtpExpiry = undefined;
     user.resetOtpVerified = false;
+    user.refreshTokenHash = undefined;
+    user.refreshTokenExpiresAt = undefined;
     await user.save();
 
     return res.status(200).json(new ApiResponse(200, null, 'Password reset successful. Please login.'));
@@ -202,6 +268,8 @@ export const changePassword = asyncHandler(async (req, res) => {
     }
 
     user.password = newPassword;
+    user.refreshTokenHash = undefined;
+    user.refreshTokenExpiresAt = undefined;
     await user.save();
 
     res.status(200).json(new ApiResponse(200, null, 'Password changed successfully.'));
@@ -213,23 +281,43 @@ export const uploadProfileAvatar = asyncHandler(async (req, res) => {
         throw new ApiError(400, 'Avatar image file is required.');
     }
 
-    const uploaded = await uploadLocalFileToCloudinaryAndCleanup(
-        req.file.path,
-        'users/avatars'
-    );
+    let uploaded = null;
+    try {
+        uploaded = await uploadLocalFileToCloudinaryAndCleanup(
+            req.file.path,
+            'users/avatars'
+        );
 
-    const user = await User.findByIdAndUpdate(
-        req.user.id,
-        { avatar: uploaded.url },
-        { new: true, runValidators: true }
-    );
-    if (!user) throw new ApiError(404, 'User not found.');
+        const existingUser = await User.findById(req.user.id).select('avatar');
+        if (!existingUser) throw new ApiError(404, 'User not found.');
+        const previousAvatar = String(existingUser.avatar || '').trim();
 
-    return res.status(200).json(
-        new ApiResponse(
-            200,
-            { user, avatar: uploaded.url, publicId: uploaded.publicId },
-            'Profile picture updated successfully.'
-        )
-    );
+        const user = await User.findByIdAndUpdate(
+            req.user.id,
+            { avatar: uploaded.url },
+            { new: true, runValidators: true }
+        );
+        if (!user) throw new ApiError(404, 'User not found.');
+
+        const previousPublicId = extractCloudinaryPublicId(previousAvatar);
+        if (previousPublicId && previousPublicId !== uploaded.publicId) {
+            await deleteFromCloudinary(previousPublicId).catch(() => null);
+        }
+
+        return res.status(200).json(
+            new ApiResponse(
+                200,
+                { user, avatar: uploaded.url, publicId: uploaded.publicId },
+                'Profile picture updated successfully.'
+            )
+        );
+    } catch (error) {
+        if (!uploaded) {
+            await cleanupLocalFiles([req.file?.path]);
+        }
+        if (uploaded?.publicId) {
+            await deleteFromCloudinary(uploaded.publicId).catch(() => null);
+        }
+        throw error;
+    }
 });

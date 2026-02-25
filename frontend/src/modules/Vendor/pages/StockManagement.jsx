@@ -24,7 +24,7 @@ const StockManagement = () => {
   const { products, isLoading, fetchProducts, patchStock } = useVendorProductStore();
   const [searchQuery, setSearchQuery] = useState("");
   const [stockFilter, setStockFilter] = useState("all");
-  const [lowStockThreshold, setLowStockThreshold] = useState(10);
+  const [alertThreshold, setAlertThreshold] = useState(10);
   const [stockModal, setStockModal] = useState({
     isOpen: false,
     product: null,
@@ -34,7 +34,7 @@ const StockManagement = () => {
 
   useEffect(() => {
     if (vendorId) {
-      fetchProducts();
+      fetchProducts({ fetchAll: true, limit: 200 });
     }
   }, [vendorId, fetchProducts]);
 
@@ -49,41 +49,29 @@ const StockManagement = () => {
       );
     }
 
-    // Stock filter
-    if (stockFilter === "low_stock") {
+    // Stock filter (use backend-computed status for consistency)
+    if (stockFilter !== "all") {
       filtered = filtered.filter(
-        (product) =>
-          product.stockQuantity <= lowStockThreshold &&
-          product.stockQuantity > 0
-      );
-    } else if (stockFilter === "out_of_stock") {
-      filtered = filtered.filter((product) => product.stockQuantity === 0);
-    } else if (stockFilter === "in_stock") {
-      filtered = filtered.filter(
-        (product) => product.stockQuantity > lowStockThreshold
+        (product) => String(product.stock || "") === stockFilter
       );
     }
 
     return filtered;
-  }, [products, searchQuery, stockFilter, lowStockThreshold]);
+  }, [products, searchQuery, stockFilter]);
 
   // Stock statistics
   const stockStats = useMemo(() => {
     const totalProducts = products.length;
-    const inStock = products.filter(
-      (p) => p.stockQuantity > lowStockThreshold
-    ).length;
-    const lowStock = products.filter(
-      (p) => p.stockQuantity <= lowStockThreshold && p.stockQuantity > 0
-    ).length;
-    const outOfStock = products.filter((p) => p.stockQuantity === 0).length;
+    const inStock = products.filter((p) => p.stock === "in_stock").length;
+    const lowStock = products.filter((p) => p.stock === "low_stock").length;
+    const outOfStock = products.filter((p) => p.stock === "out_of_stock").length;
     const totalValue = products.reduce(
       (sum, p) => sum + p.price * (p.stockQuantity || 0),
       0
     );
 
     return { totalProducts, inStock, lowStock, outOfStock, totalValue };
-  }, [products, lowStockThreshold]);
+  }, [products]);
 
   const handleStockUpdate = async (productId, newQuantity) => {
     const success = await patchStock(productId, newQuantity);
@@ -253,13 +241,13 @@ const StockManagement = () => {
           />
           <div className="flex items-center gap-2">
             <label className="text-sm text-gray-600 whitespace-nowrap">
-              Low Stock Threshold:
+              Alert Threshold:
             </label>
             <input
               type="number"
-              value={lowStockThreshold}
+              value={alertThreshold}
               onChange={(e) =>
-                setLowStockThreshold(parseInt(e.target.value) || 10)
+                setAlertThreshold(parseInt(e.target.value, 10) || 10)
               }
               min="1"
               className="w-20 px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
@@ -305,7 +293,7 @@ const StockManagement = () => {
       <StockUpdateModal
         isOpen={stockModal.isOpen}
         product={stockModal.product}
-        lowStockThreshold={lowStockThreshold}
+        alertThreshold={alertThreshold}
         onClose={() => setStockModal({ isOpen: false, product: null })}
         onUpdate={(newQuantity) => {
           if (stockModal.product) {
@@ -321,7 +309,7 @@ const StockManagement = () => {
 const StockUpdateModal = ({
   isOpen,
   product,
-  lowStockThreshold,
+  alertThreshold,
   onClose,
   onUpdate,
 }) => {
@@ -365,10 +353,14 @@ const StockUpdateModal = ({
     setStockQuantity(newQuantity);
   };
 
+  const effectiveThreshold = Number(
+    product?.lowStockThreshold ?? alertThreshold ?? 10
+  );
+
   const newStockStatus =
     stockQuantity === 0
       ? "out_of_stock"
-      : stockQuantity <= lowStockThreshold
+      : stockQuantity <= effectiveThreshold
         ? "low_stock"
         : "in_stock";
 
@@ -485,6 +477,9 @@ const StockUpdateModal = ({
                 <div className="p-4 bg-gray-50 rounded-lg">
                   <p className="text-sm text-gray-600 mb-1">
                     New Stock Status:
+                  </p>
+                  <p className="text-xs text-gray-500 mb-2">
+                    Threshold used: {effectiveThreshold}
                   </p>
                   <Badge
                     variant={

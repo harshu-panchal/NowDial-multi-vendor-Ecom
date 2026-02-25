@@ -48,7 +48,7 @@ export const updateAddress = asyncHandler(async (req, res) => {
     const addr = await Address.findOne({ _id: req.params.id, userId: req.user.id });
     if (!addr) throw new ApiError(404, 'Address not found.');
 
-    if (req.body.isDefault) {
+    if (req.body.isDefault === true) {
         await Address.updateMany({ userId: req.user.id }, { isDefault: false });
     }
 
@@ -61,7 +61,10 @@ export const updateAddress = asyncHandler(async (req, res) => {
                 return;
             }
             if (field === 'isDefault') {
-                payload.isDefault = Boolean(req.body.isDefault);
+                // Avoid clearing default via update payload; default change should be explicit (true only).
+                if (req.body.isDefault === true) {
+                    payload.isDefault = true;
+                }
                 return;
             }
             payload[field] = toTrimmed(req.body[field]);
@@ -91,8 +94,17 @@ export const deleteAddress = asyncHandler(async (req, res) => {
 
 // PATCH /api/user/addresses/:id/default
 export const setDefaultAddress = asyncHandler(async (req, res) => {
-    await Address.updateMany({ userId: req.user.id }, { isDefault: false });
-    const addr = await Address.findOneAndUpdate({ _id: req.params.id, userId: req.user.id }, { isDefault: true }, { new: true });
+    const addr = await Address.findOne({ _id: req.params.id, userId: req.user.id });
     if (!addr) throw new ApiError(404, 'Address not found.');
+
+    await Address.updateMany(
+        { userId: req.user.id, _id: { $ne: addr._id } },
+        { isDefault: false }
+    );
+    if (!addr.isDefault) {
+        addr.isDefault = true;
+        await addr.save();
+    }
+
     res.status(200).json(new ApiResponse(200, addr, 'Default address updated.'));
 });
