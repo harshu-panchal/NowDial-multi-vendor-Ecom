@@ -9,7 +9,7 @@ export const createProductSchema = Joi.object({
     originalPrice: Joi.number().min(0).optional(),
     unit: Joi.string().allow('').default('Piece'),
     categoryId: objectId.required(),
-    subcategoryId: objectId.allow(null).optional(),
+    subcategoryId: objectId.allow(null, '').optional(),
     brandId: objectId.allow(null, '').optional(),
     stockQuantity: Joi.number().integer().min(0).default(0),
     lowStockThreshold: Joi.number().integer().min(0).default(10),
@@ -43,11 +43,20 @@ export const createProductSchema = Joi.object({
     variants: Joi.object({
         sizes: Joi.array().items(Joi.string()),
         colors: Joi.array().items(Joi.string()),
+        attributes: Joi.array().items(
+            Joi.object({
+                name: Joi.string().trim().allow('').optional(),
+                values: Joi.array().items(Joi.string().trim()).optional(),
+            })
+        ).optional(),
         prices: Joi.object().optional(),
+        stockMap: Joi.object().optional(),
+        imageMap: Joi.object().optional(),
         defaultVariant: Joi.object({
             size: Joi.string().allow('').optional(),
             color: Joi.string().allow('').optional(),
         }).optional(),
+        defaultSelection: Joi.object().optional(),
     }).optional(),
 }).unknown(true);
 
@@ -58,7 +67,7 @@ export const updateProductSchema = Joi.object({
     originalPrice: Joi.number().min(0).allow(null).optional(),
     unit: Joi.string().allow('').optional(),
     categoryId: objectId.optional(),
-    subcategoryId: objectId.allow(null).optional(),
+    subcategoryId: objectId.allow(null, '').optional(),
     brandId: objectId.allow(null, '').optional(),
     stockQuantity: Joi.number().integer().min(0).optional(),
     lowStockThreshold: Joi.number().integer().min(0).optional(),
@@ -92,11 +101,20 @@ export const updateProductSchema = Joi.object({
     variants: Joi.object({
         sizes: Joi.array().items(Joi.string()),
         colors: Joi.array().items(Joi.string()),
+        attributes: Joi.array().items(
+            Joi.object({
+                name: Joi.string().trim().allow('').optional(),
+                values: Joi.array().items(Joi.string().trim()).optional(),
+            })
+        ).optional(),
         prices: Joi.object().optional(),
+        stockMap: Joi.object().optional(),
+        imageMap: Joi.object().optional(),
         defaultVariant: Joi.object({
             size: Joi.string().allow('').optional(),
             color: Joi.string().allow('').optional(),
         }).optional(),
+        defaultSelection: Joi.object().optional(),
     }).optional(),
 }).unknown(true);
 

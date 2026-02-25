@@ -17,6 +17,182 @@ const sanitizeFaqs = (faqs) => {
         .filter((faq) => faq.question && faq.answer);
 };
 
+const normalizeVariantPart = (value) => String(value || '').trim().toLowerCase();
+
+const uniqueAxisValues = (values = []) => {
+    const seen = new Set();
+    const out = [];
+    for (const raw of values) {
+        const value = String(raw || '').trim();
+        if (!value) continue;
+        const key = normalizeVariantPart(value);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(value);
+    }
+    return out;
+};
+
+const createVariantKey = (size = '', color = '') =>
+    `${normalizeVariantPart(size)}|${normalizeVariantPart(color)}`;
+const normalizeAxisName = (value) =>
+    String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, '_');
+const createDynamicVariantKey = (selection = {}) =>
+    Object.entries(selection || {})
+        .map(([axis, value]) => [normalizeAxisName(axis), normalizeVariantPart(value)])
+        .filter(([axis, value]) => axis && value)
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([axis, value]) => `${axis}=${value}`)
+        .join('|');
+
+const toObjectEntries = (value) => {
+    if (!value) return [];
+    if (value instanceof Map) return Array.from(value.entries());
+    if (typeof value === 'object') return Object.entries(value);
+    return [];
+};
+
+const toNonNegativeNumber = (raw) => {
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+};
+
+const normalizeAttributes = (rawAttributes = []) => {
+    const seen = new Set();
+    const attributes = [];
+    for (const raw of rawAttributes || []) {
+        const name = String(raw?.name || '').trim();
+        const axisKey = normalizeAxisName(name);
+        if (!name || !axisKey || seen.has(axisKey)) continue;
+        seen.add(axisKey);
+        const values = uniqueAxisValues(raw?.values || []);
+        if (!values.length) continue;
+        attributes.push({ name, axisKey, values });
+    }
+    return attributes;
+};
+
+const buildCombinationsFromAttributes = (attributes = []) => {
+    if (!attributes.length) return [];
+    let combos = [{}];
+    attributes.forEach((attr) => {
+        const next = [];
+        combos.forEach((selection) => {
+            attr.values.forEach((value) => next.push({ ...selection, [attr.axisKey]: value }));
+        });
+        combos = next;
+    });
+    return combos;
+};
+
+const normalizeVariantsPayload = (rawVariants = {}, fallbackPrice) => {
+    if (!rawVariants || typeof rawVariants !== 'object') {
+        return { sizes: [], colors: [], prices: {}, stockMap: {}, imageMap: {}, defaultVariant: {} };
+    }
+
+    const sizes = uniqueAxisValues(rawVariants.sizes || []);
+    const colors = uniqueAxisValues(rawVariants.colors || []);
+    const attributes = normalizeAttributes(rawVariants.attributes || []);
+    const hasSizeAxis = sizes.length > 0;
+    const hasColorAxis = colors.length > 0;
+    const hasDynamicAxes = attributes.length > 0;
+    const hasAnyAxis = hasDynamicAxes || hasSizeAxis || hasColorAxis;
+
+    if (!hasAnyAxis) {
+        return { sizes: [], colors: [], attributes: [], prices: {}, stockMap: {}, imageMap: {}, defaultVariant: {}, defaultSelection: {} };
+    }
+
+    const combinations = [];
+    if (hasDynamicAxes) {
+        buildCombinationsFromAttributes(attributes).forEach((selection) => combinations.push({ selection }));
+    } else if (hasSizeAxis && hasColorAxis) {
+        sizes.forEach((size) => colors.forEach((color) => combinations.push({ selection: { size, color } })));
+    } else if (hasSizeAxis) {
+        sizes.forEach((size) => combinations.push({ selection: { size } }));
+    } else {
+        colors.forEach((color) => combinations.push({ selection: { color } }));
+    }
+
+    const pricesSource = Object.fromEntries(toObjectEntries(rawVariants.prices));
+    const stockSource = Object.fromEntries(toObjectEntries(rawVariants.stockMap));
+    const imageSource = Object.fromEntries(toObjectEntries(rawVariants.imageMap));
+    const prices = {};
+    const stockMap = {};
+    const imageMap = {};
+
+    combinations.forEach(({ selection }) => {
+        const size = String(selection?.size || '');
+        const color = String(selection?.color || '');
+        const key = hasDynamicAxes
+            ? createDynamicVariantKey(selection)
+            : createVariantKey(size, color);
+        const parsedPrice = toNonNegativeNumber(pricesSource[key]);
+        if (parsedPrice !== null) {
+            prices[key] = parsedPrice;
+        } else {
+            const fallback = toNonNegativeNumber(fallbackPrice);
+            if (fallback !== null) prices[key] = fallback;
+        }
+
+        const parsedStock = toNonNegativeNumber(stockSource[key]);
+        if (parsedStock !== null) stockMap[key] = parsedStock;
+
+        const image = String(imageSource[key] || '').trim();
+        if (image) imageMap[key] = image;
+    });
+
+    const defaultSize = String(rawVariants?.defaultVariant?.size || '').trim();
+    const defaultColor = String(rawVariants?.defaultVariant?.color || '').trim();
+    const normalizedDefaultSize = hasSizeAxis ? defaultSize : '';
+    const normalizedDefaultColor = hasColorAxis ? defaultColor : '';
+    const hasValidDefaultSize = !normalizedDefaultSize || sizes.some((s) => normalizeVariantPart(s) === normalizeVariantPart(normalizedDefaultSize));
+    const hasValidDefaultColor = !normalizedDefaultColor || colors.some((c) => normalizeVariantPart(c) === normalizeVariantPart(normalizedDefaultColor));
+    if (!hasValidDefaultSize || !hasValidDefaultColor) {
+        throw new ApiError(400, 'Default variant must exist in provided sizes/colors.');
+    }
+
+    const defaultSelection = {};
+    if (rawVariants?.defaultSelection && typeof rawVariants.defaultSelection === 'object') {
+        Object.entries(rawVariants.defaultSelection).forEach(([axis, value]) => {
+            const axisKey = normalizeAxisName(axis);
+            const selectedValue = String(value || '').trim();
+            if (!axisKey || !selectedValue) return;
+            const axisMeta = attributes.find((attr) => attr.axisKey === axisKey);
+            if (!axisMeta) return;
+            const matched = axisMeta.values.find(
+                (candidate) => normalizeVariantPart(candidate) === normalizeVariantPart(selectedValue)
+            );
+            if (matched) defaultSelection[axisKey] = matched;
+        });
+    }
+
+    return {
+        sizes,
+        colors,
+        attributes: attributes.map((attr) => ({ name: attr.name, values: attr.values })),
+        prices,
+        stockMap,
+        imageMap,
+        defaultVariant: {
+            size: normalizedDefaultSize,
+            color: normalizedDefaultColor,
+        },
+        defaultSelection,
+    };
+};
+
+const calculateVariantAggregateStock = (variants = {}) => {
+    const entries = toObjectEntries(variants.stockMap);
+    if (!entries.length) return null;
+    return entries.reduce((sum, [, value]) => {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) && parsed >= 0 ? sum + parsed : sum;
+    }, 0);
+};
+
 const sanitizeCategoryPayload = (payload = {}) => {
     const allowed = ['name', 'description', 'image', 'icon', 'parentId', 'order', 'isActive'];
     const sanitized = {};
@@ -107,11 +283,16 @@ export const getProductById = asyncHandler(async (req, res) => {
 export const createProduct = asyncHandler(async (req, res) => {
     const { name, stockQuantity = 0, stock, ...rest } = req.body;
     const slug = slugify(name) + '-' + Date.now();
+    const normalizedVariants = normalizeVariantsPayload(rest.variants, rest.price);
 
     const numericStockQuantity = Number(stockQuantity) || 0;
-    const normalizedStock = stock || (numericStockQuantity <= 0
+    const variantAggregateStock = calculateVariantAggregateStock(normalizedVariants);
+    const finalStockQuantity = Number.isFinite(variantAggregateStock)
+        ? variantAggregateStock
+        : numericStockQuantity;
+    const normalizedStock = stock || (finalStockQuantity <= 0
         ? 'out_of_stock'
-        : numericStockQuantity <= 10
+        : finalStockQuantity <= 10
             ? 'low_stock'
             : 'in_stock');
 
@@ -119,8 +300,9 @@ export const createProduct = asyncHandler(async (req, res) => {
         name,
         slug,
         stock: normalizedStock,
-        stockQuantity: numericStockQuantity,
+        stockQuantity: finalStockQuantity,
         ...rest,
+        variants: normalizedVariants,
         faqs: sanitizeFaqs(rest.faqs),
     });
     res.status(201).json(new ApiResponse(201, product, 'Product created.'));
@@ -148,6 +330,24 @@ export const updateProduct = asyncHandler(async (req, res) => {
     }
     if (Object.prototype.hasOwnProperty.call(payload, 'faqs')) {
         payload.faqs = sanitizeFaqs(payload.faqs);
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, 'variants')) {
+        const fallbackPrice =
+            Object.prototype.hasOwnProperty.call(payload, 'price')
+                ? payload.price
+                : (await Product.findById(req.params.id).select('price').lean())?.price;
+        payload.variants = normalizeVariantsPayload(payload.variants, fallbackPrice);
+        const variantAggregateStock = calculateVariantAggregateStock(payload.variants);
+        if (Number.isFinite(variantAggregateStock)) {
+            payload.stockQuantity = variantAggregateStock;
+            if (!payload.stock) {
+                payload.stock = variantAggregateStock <= 0
+                    ? 'out_of_stock'
+                    : variantAggregateStock <= 10
+                        ? 'low_stock'
+                        : 'in_stock';
+            }
+        }
     }
 
     const product = await Product.findByIdAndUpdate(req.params.id, payload, { new: true, runValidators: true });

@@ -1,4 +1,9 @@
 const normalizePart = (value) => String(value || "").trim().toLowerCase();
+const normalizeAxisName = (value) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_");
 
 const uniqueClean = (values) => {
   const seen = new Set();
@@ -20,20 +25,89 @@ export const parseVariantAxis = (text) =>
 export const createVariantKey = (size, color) =>
   `${normalizePart(size)}|${normalizePart(color)}`;
 
-export const buildVariantCombinations = (sizes = [], colors = []) => {
+export const createDynamicVariantKey = (selection = {}) => {
+  const entries = Object.entries(selection || {})
+    .map(([axis, value]) => [normalizeAxisName(axis), normalizePart(value)])
+    .filter(([axis, value]) => axis && value)
+    .sort((a, b) => a[0].localeCompare(b[0]));
+  return entries.map(([axis, value]) => `${axis}=${value}`).join("|");
+};
+
+const normalizeAttributes = (attributes = []) => {
+  const out = [];
+  const seenAxes = new Set();
+  for (const rawAttr of attributes || []) {
+    const name = String(rawAttr?.name || "").trim();
+    const axisKey = normalizeAxisName(name);
+    if (!name || !axisKey || seenAxes.has(axisKey)) continue;
+    seenAxes.add(axisKey);
+    const values = uniqueClean(rawAttr?.values || []);
+    if (!values.length) continue;
+    out.push({ name, axisKey, values });
+  }
+  return out;
+};
+
+const buildCombinationsFromAttributes = (attributes = []) => {
+  if (!attributes.length) return [];
+  let combinations = [{}];
+  attributes.forEach((attr) => {
+    const next = [];
+    combinations.forEach((current) => {
+      attr.values.forEach((value) => {
+        next.push({ ...current, [attr.axisKey]: value });
+      });
+    });
+    combinations = next;
+  });
+  return combinations;
+};
+
+export const buildVariantCombinations = (sizes = [], colors = [], attributes = []) => {
+  const normalizedAttributes = normalizeAttributes(attributes);
+  if (normalizedAttributes.length > 0) {
+    return buildCombinationsFromAttributes(normalizedAttributes).map((selection) => ({
+      selection,
+      size: selection.size || "",
+      color: selection.color || "",
+      key: createDynamicVariantKey(selection),
+      label: normalizedAttributes
+        .map((attr) => `${attr.name}: ${selection[attr.axisKey] || "-"}`)
+        .join(" / "),
+    }));
+  }
+
   const cleanSizes = uniqueClean(sizes);
   const cleanColors = uniqueClean(colors);
 
   if (cleanSizes.length > 0 && cleanColors.length > 0) {
     return cleanSizes.flatMap((size) =>
-      cleanColors.map((color) => ({ size, color, key: createVariantKey(size, color) }))
+      cleanColors.map((color) => ({
+        size,
+        color,
+        selection: { size, color },
+        key: createVariantKey(size, color),
+        label: `${size || "Any Size"} / ${color || "Any Color"}`,
+      }))
     );
   }
   if (cleanSizes.length > 0) {
-    return cleanSizes.map((size) => ({ size, color: "", key: createVariantKey(size, "") }));
+    return cleanSizes.map((size) => ({
+      size,
+      color: "",
+      selection: { size },
+      key: createVariantKey(size, ""),
+      label: `${size || "Any Size"} / Any Color`,
+    }));
   }
   if (cleanColors.length > 0) {
-    return cleanColors.map((color) => ({ size: "", color, key: createVariantKey("", color) }));
+    return cleanColors.map((color) => ({
+      size: "",
+      color,
+      selection: { color },
+      key: createVariantKey("", color),
+      label: `Any Size / ${color || "Any Color"}`,
+    }));
   }
   return [];
 };
@@ -83,50 +157,110 @@ const resolveCombinationPrice = (rawPrices, size, color) => {
 export const normalizeVariantStateForForm = (rawVariants = {}, basePrice = "") => {
   const sizes = uniqueClean(rawVariants?.sizes || []);
   const colors = uniqueClean(rawVariants?.colors || []);
-  const combinations = buildVariantCombinations(sizes, colors);
+  const attributes = normalizeAttributes(rawVariants?.attributes || []).map((attr) => ({
+    name: attr.name,
+    values: attr.values,
+  }));
+  const combinations = buildVariantCombinations(sizes, colors, attributes);
   const fallbackPrice = parsePriceValue(basePrice);
 
   const prices = {};
+  const stockMap = {};
+  const imageMap = {};
   combinations.forEach(({ size, color, key }) => {
     const resolved = resolveCombinationPrice(rawVariants?.prices, size, color);
     if (resolved !== null) prices[key] = resolved;
     else if (fallbackPrice !== null) prices[key] = fallbackPrice;
+
+    const stockValue = parsePriceValue(rawVariants?.stockMap?.[key]);
+    if (stockValue !== null) stockMap[key] = stockValue;
+
+    const imageValue = String(rawVariants?.imageMap?.[key] || "").trim();
+    if (imageValue) imageMap[key] = imageValue;
   });
 
   const defaultVariant = {
     size: String(rawVariants?.defaultVariant?.size || "").trim(),
     color: String(rawVariants?.defaultVariant?.color || "").trim(),
   };
+  const defaultSelection = rawVariants?.defaultSelection && typeof rawVariants.defaultSelection === "object"
+    ? Object.entries(rawVariants.defaultSelection).reduce((acc, [key, value]) => {
+      const axis = normalizeAxisName(key);
+      const normalizedValue = String(value || "").trim();
+      if (axis && normalizedValue) acc[axis] = normalizedValue;
+      return acc;
+    }, {})
+    : {};
 
-  return { sizes, colors, prices, defaultVariant };
+  return { sizes, colors, attributes, prices, stockMap, imageMap, defaultVariant, defaultSelection };
 };
 
-export const syncVariantPricesWithAxes = (currentPrices = {}, sizes = [], colors = [], fallbackPrice = "") => {
-  const combinations = buildVariantCombinations(sizes, colors);
-  const next = {};
+export const syncVariantPricesWithAxes = (
+  currentPrices = {},
+  currentStockMap = {},
+  currentImageMap = {},
+  sizes = [],
+  colors = [],
+  attributes = [],
+  fallbackPrice = ""
+) => {
+  const combinations = buildVariantCombinations(sizes, colors, attributes);
+  const nextPrices = {};
+  const nextStockMap = {};
+  const nextImageMap = {};
   const parsedFallback = parsePriceValue(fallbackPrice);
 
   combinations.forEach(({ key }) => {
-    const parsedCurrent = parsePriceValue(currentPrices[key]);
-    if (parsedCurrent !== null) {
-      next[key] = parsedCurrent;
+    const parsedCurrentPrice = parsePriceValue(currentPrices[key]);
+    const parsedCurrentStock = parsePriceValue(currentStockMap[key]);
+    const currentImage = String(currentImageMap[key] || "").trim();
+
+    if (parsedCurrentPrice !== null) {
+      nextPrices[key] = parsedCurrentPrice;
     } else if (parsedFallback !== null) {
-      next[key] = parsedFallback;
+      nextPrices[key] = parsedFallback;
+    }
+
+    if (parsedCurrentStock !== null) {
+      nextStockMap[key] = parsedCurrentStock;
+    }
+    if (currentImage) {
+      nextImageMap[key] = currentImage;
     }
   });
-  return next;
+  return {
+    prices: nextPrices,
+    stockMap: nextStockMap,
+    imageMap: nextImageMap,
+  };
 };
 
 export const buildVariantPayload = (rawVariants = {}) => {
   const sizes = uniqueClean(rawVariants?.sizes || []);
   const colors = uniqueClean(rawVariants?.colors || []);
-  const combinations = buildVariantCombinations(sizes, colors);
+  const attributes = normalizeAttributes(rawVariants?.attributes || []).map((attr) => ({
+    name: attr.name,
+    values: attr.values,
+  }));
+  const combinations = buildVariantCombinations(sizes, colors, attributes);
   const prices = {};
+  const stockMap = {};
+  const imageMap = {};
 
   combinations.forEach(({ key }) => {
-    const parsed = parsePriceValue(rawVariants?.prices?.[key]);
-    if (parsed !== null) {
-      prices[key] = parsed;
+    const parsedPrice = parsePriceValue(rawVariants?.prices?.[key]);
+    if (parsedPrice !== null) {
+      prices[key] = parsedPrice;
+    }
+
+    const parsedStock = parsePriceValue(rawVariants?.stockMap?.[key]);
+    if (parsedStock !== null) {
+      stockMap[key] = parsedStock;
+    }
+
+    const image = String(rawVariants?.imageMap?.[key] || "").trim();
+    if (image) {
+      imageMap[key] = image;
     }
   });
 
@@ -134,14 +268,26 @@ export const buildVariantPayload = (rawVariants = {}) => {
     size: String(rawVariants?.defaultVariant?.size || "").trim(),
     color: String(rawVariants?.defaultVariant?.color || "").trim(),
   };
+  const defaultSelection = rawVariants?.defaultSelection && typeof rawVariants.defaultSelection === "object"
+    ? Object.entries(rawVariants.defaultSelection).reduce((acc, [key, value]) => {
+      const axis = normalizeAxisName(key);
+      const normalizedValue = String(value || "").trim();
+      if (axis && normalizedValue) acc[axis] = normalizedValue;
+      return acc;
+    }, {})
+    : {};
 
-  const hasVariants = sizes.length > 0 || colors.length > 0;
-  if (!hasVariants) return { sizes: [], colors: [], prices: {}, defaultVariant: {} };
+  const hasVariants = attributes.length > 0 || sizes.length > 0 || colors.length > 0;
+  if (!hasVariants) return { sizes: [], colors: [], attributes: [], prices: {}, stockMap: {}, imageMap: {}, defaultVariant: {}, defaultSelection: {} };
 
   return {
     sizes,
     colors,
+    attributes,
     prices,
+    stockMap,
+    imageMap,
     defaultVariant,
+    defaultSelection,
   };
 };

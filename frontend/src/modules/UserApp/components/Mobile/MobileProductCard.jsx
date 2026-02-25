@@ -1,5 +1,5 @@
 import { FiHeart, FiShoppingBag, FiStar, FiTrash2 } from "react-icons/fi";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useCartStore, useUIStore } from "../../../../shared/store/useStore";
 import { useWishlistStore } from "../../../../shared/store/wishlistStore";
@@ -15,8 +15,10 @@ import LongPressMenu from "./LongPressMenu";
 import FlyingItem from "./FlyingItem";
 import VendorBadge from "../../../Vendor/components/VendorBadge";
 import { getVendorById } from "../../data/catalogData";
+import { getVariantSignature } from "../../../../shared/utils/variant";
 
 const MobileProductCard = ({ product }) => {
+  const navigate = useNavigate();
   const { items, addItem, removeItem } = useCartStore();
   const triggerCartAnimation = useUIStore(
     (state) => state.triggerCartAnimation
@@ -26,8 +28,7 @@ const MobileProductCard = ({ product }) => {
     removeItem: removeFromWishlist,
     isInWishlist,
   } = useWishlistStore();
-  const hasNoVariant = (cartItem) =>
-    !cartItem?.variant?.size && !cartItem?.variant?.color;
+  const hasNoVariant = (cartItem) => !getVariantSignature(cartItem?.variant || {});
   const isFavorite = isInWishlist(product.id);
   const isInCart = items.some(
     (item) => item.id === product.id && hasNoVariant(item)
@@ -45,6 +46,17 @@ const MobileProductCard = ({ product }) => {
     if (e) {
       e.preventDefault();
       e.stopPropagation();
+    }
+
+    const hasDynamicAxes =
+      Array.isArray(product?.variants?.attributes) &&
+      product.variants.attributes.some((attr) => Array.isArray(attr?.values) && attr.values.length > 0);
+    const hasSizeVariants = Array.isArray(product?.variants?.sizes) && product.variants.sizes.length > 0;
+    const hasColorVariants = Array.isArray(product?.variants?.colors) && product.variants.colors.length > 0;
+    if (hasDynamicAxes || hasSizeVariants || hasColorVariants) {
+      toast.error("Please select variant on product page");
+      navigate(`/product/${product.id}`);
+      return;
     }
 
     const isLargeScreen = window.innerWidth >= 1024;

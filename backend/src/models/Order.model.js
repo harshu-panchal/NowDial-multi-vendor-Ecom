@@ -7,7 +7,8 @@ const orderItemSchema = new mongoose.Schema({
     image: String,
     price: Number,
     quantity: Number,
-    variant: { size: String, color: String },
+    variant: { type: mongoose.Schema.Types.Mixed, default: {} },
+    variantKey: String,
 });
 
 const vendorItemGroupSchema = new mongoose.Schema({

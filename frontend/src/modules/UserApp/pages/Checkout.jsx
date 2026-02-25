@@ -9,6 +9,7 @@ import {
   FiPlus,
   FiArrowLeft,
   FiShoppingBag,
+  FiTag,
 } from "react-icons/fi";
 import { motion, AnimatePresence } from "framer-motion";
 import { FiLock } from "react-icons/fi";
@@ -42,6 +43,7 @@ const MobileCheckout = () => {
   const [selectedAddressId, setSelectedAddressId] = useState(null);
   const [showAddressForm, setShowAddressForm] = useState(false);
   const [couponCode, setCouponCode] = useState("");
+  const [availableCoupons, setAvailableCoupons] = useState([]);
   const [appliedCoupon, setAppliedCoupon] = useState(null);
   const [appliedDiscount, setAppliedDiscount] = useState(0);
   const [isApplyingCoupon, setIsApplyingCoupon] = useState(false);
@@ -66,6 +68,28 @@ const MobileCheckout = () => {
       fetchAddresses().catch(() => null);
     }
   }, [isAuthenticated, fetchAddresses]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const fetchCoupons = async () => {
+      try {
+        const response = await api.get("/coupons/available");
+        const payload = response?.data ?? response;
+        if (!cancelled) {
+          setAvailableCoupons(Array.isArray(payload) ? payload : []);
+        }
+      } catch {
+        if (!cancelled) {
+          setAvailableCoupons([]);
+        }
+      }
+    };
+
+    fetchCoupons();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (isAuthenticated && user) {
@@ -174,8 +198,8 @@ const MobileCheckout = () => {
     };
   }, [items, formData.country, shippingOption, appliedCoupon?.type]);
 
-  const handleApplyCoupon = async () => {
-    const normalizedCode = couponCode.trim().toUpperCase();
+  const handleApplyCoupon = async (codeOverride = "") => {
+    const normalizedCode = String(codeOverride || couponCode).trim().toUpperCase();
     if (!normalizedCode) {
       toast.error("Please enter a coupon code");
       return;
@@ -632,22 +656,57 @@ const MobileCheckout = () => {
                         Coupon Code
                       </h3>
                       {!appliedCoupon ? (
-                        <div className="flex gap-2">
-                          <input
-                            type="text"
-                            value={couponCode}
-                            onChange={(e) => setCouponCode(e.target.value)}
-                            placeholder="Enter code"
-                            className="flex-1 px-4 py-3 rounded-xl border-2 border-gray-200 focus:outline-none focus:ring-2 focus:ring-primary-500 text-base"
-                          />
-                          <button
-                            type="button"
-                            onClick={handleApplyCoupon}
-                            disabled={isApplyingCoupon}
-                            className="px-4 py-3 gradient-green text-white rounded-xl font-semibold hover:shadow-glow-green transition-all">
-                            {isApplyingCoupon ? "Applying..." : "Apply"}
-                          </button>
-                        </div>
+                        <>
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              value={couponCode}
+                              onChange={(e) => setCouponCode(e.target.value)}
+                              placeholder="Enter code"
+                              className="flex-1 px-4 py-3 rounded-xl border-2 border-gray-200 focus:outline-none focus:ring-2 focus:ring-primary-500 text-base"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleApplyCoupon()}
+                              disabled={isApplyingCoupon}
+                              className="px-4 py-3 gradient-green text-white rounded-xl font-semibold hover:shadow-glow-green transition-all">
+                              {isApplyingCoupon ? "Applying..." : "Apply"}
+                            </button>
+                          </div>
+                          {availableCoupons.length > 0 && (
+                            <div className="mt-3 bg-gray-50 rounded-xl p-3 border border-gray-200">
+                              <h4 className="text-sm font-semibold text-gray-800 mb-2 flex items-center gap-2">
+                                <FiTag className="text-primary-600" />
+                                Available coupons
+                              </h4>
+                              <div className="space-y-2 max-h-40 overflow-y-auto">
+                                {availableCoupons.slice(0, 8).map((coupon) => (
+                                  <button
+                                    key={coupon._id || coupon.code}
+                                    type="button"
+                                    onClick={() => handleApplyCoupon(coupon.code)}
+                                    disabled={isApplyingCoupon}
+                                    className="w-full text-left p-2 bg-white rounded-lg border border-gray-200 hover:border-primary-300 transition-colors"
+                                  >
+                                    <div className="flex items-center justify-between">
+                                      <p className="text-sm font-semibold text-gray-800">{coupon.code}</p>
+                                      <p className="text-xs font-semibold text-primary-700">
+                                        {coupon.type === "percentage"
+                                          ? `${coupon.value}% OFF`
+                                          : coupon.type === "fixed"
+                                            ? `${formatPrice(coupon.value)} OFF`
+                                            : "Free Shipping"}
+                                      </p>
+                                    </div>
+                                    <p className="text-xs text-gray-600">
+                                      Min order: {formatPrice(coupon.minOrderValue || 0)}
+                                    </p>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </>
                       ) : (
                         <div className="flex items-center justify-between p-3 bg-green-50 rounded-xl">
                           <div>

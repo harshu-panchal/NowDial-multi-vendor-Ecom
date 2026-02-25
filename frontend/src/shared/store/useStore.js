@@ -3,10 +3,8 @@ import { persist, createJSONStorage } from "zustand/middleware";
 import toast from "react-hot-toast";
 import { useAuthStore } from "./authStore";
 import { setPostLoginAction, setPostLoginRedirect } from "../utils/postLoginAction";
+import { getVariantSignature } from "../utils/variant";
 
-const normalizeVariantPart = (value) => String(value || "").trim().toLowerCase();
-const getVariantSignature = (variant = {}) =>
-  `${normalizeVariantPart(variant?.size)}|${normalizeVariantPart(variant?.color)}`;
 const getCartLineKey = (id, variant = {}) =>
   `${String(id)}::${getVariantSignature(variant)}`;
 const getCurrentAuthUserId = () => {

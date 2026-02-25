@@ -34,17 +34,34 @@ import MobileProductCard from "../components/Mobile/MobileProductCard";
 import PageTransition from "../../../shared/components/PageTransition";
 import Badge from "../../../shared/components/Badge";
 import ProductCard from "../../../shared/components/ProductCard";
+import { getVariantSignature } from "../../../shared/utils/variant";
 
 const resolveVariantPrice = (product, selectedVariant) => {
   const basePrice = Number(product?.price) || 0;
   if (!selectedVariant || !product?.variants?.prices) return basePrice;
 
-  const size = String(selectedVariant.size || "").trim().toLowerCase();
-  const color = String(selectedVariant.color || "").trim().toLowerCase();
   const entries =
     product.variants.prices instanceof Map
       ? Array.from(product.variants.prices.entries())
       : Object.entries(product.variants.prices || {});
+  const dynamicKey = getVariantSignature(selectedVariant || {});
+  if (dynamicKey) {
+    const direct = entries.find(([key]) => String(key).trim() === dynamicKey);
+    if (direct) {
+      const parsed = Number(direct[1]);
+      if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+    }
+    const normalized = entries.find(
+      ([key]) => String(key).trim().toLowerCase() === dynamicKey.toLowerCase()
+    );
+    if (normalized) {
+      const parsed = Number(normalized[1]);
+      if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+    }
+  }
+
+  const size = String(selectedVariant.size || "").trim().toLowerCase();
+  const color = String(selectedVariant.color || "").trim().toLowerCase();
 
   const candidates = [
     `${size}|${color}`,
@@ -74,7 +91,6 @@ const resolveVariantPrice = (product, selectedVariant) => {
 };
 
 const isMongoId = (value) => /^[a-fA-F0-9]{24}$/.test(String(value || ""));
-
 const normalizeProduct = (raw) => {
   if (!raw) return null;
 
@@ -179,7 +195,14 @@ const MobileProductDetail = () => {
   }, [product]);
 
   const isFavorite = product ? isInWishlist(product.id) : false;
-  const isInCart = product ? items.some((item) => item.id === product.id) : false;
+  const selectedVariantSignature = getVariantSignature(selectedVariant || {});
+  const isInCart = product
+    ? items.some(
+      (item) =>
+        String(item.id) === String(product.id) &&
+        getVariantSignature(item.variant || {}) === selectedVariantSignature
+    )
+    : false;
   const productReviews = product ? sortReviews(product.id, "newest") : [];
 
   useEffect(() => {
@@ -240,9 +263,15 @@ const MobileProductDetail = () => {
   }, [id, localFallbackProduct]);
 
   useEffect(() => {
+    if (product?.variants?.defaultSelection && typeof product.variants.defaultSelection === "object") {
+      setSelectedVariant(product.variants.defaultSelection);
+      return;
+    }
     if (product?.variants?.defaultVariant) {
       setSelectedVariant(product.variants.defaultVariant);
+      return;
     }
+    setSelectedVariant({});
   }, [product]);
 
   useEffect(() => {
@@ -284,8 +313,39 @@ const MobileProductDetail = () => {
       toast.error("Product is out of stock");
       return;
     }
+    const attributeAxes = Array.isArray(product?.variants?.attributes)
+      ? product.variants.attributes.filter((attr) => Array.isArray(attr?.values) && attr.values.length > 0)
+      : [];
+    const hasDynamicAxes = attributeAxes.length > 0;
+    const hasSizeVariants = Array.isArray(product?.variants?.sizes) && product.variants.sizes.length > 0;
+    const hasColorVariants = Array.isArray(product?.variants?.colors) && product.variants.colors.length > 0;
+    const isMissingDynamicAxis = hasDynamicAxes
+      ? attributeAxes.some((attr) => !String(selectedVariant?.[attr.name] || selectedVariant?.[String(attr.name || "").toLowerCase().replace(/\s+/g, "_")] || "").trim())
+      : false;
+    const selectedSize = String(selectedVariant?.size || "").trim();
+    const selectedColor = String(selectedVariant?.color || "").trim();
+    if (isMissingDynamicAxis || ((hasSizeVariants && !selectedSize) || (hasColorVariants && !selectedColor))) {
+      toast.error("Please select required variant options");
+      return;
+    }
 
     const finalPrice = resolveVariantPrice(product, selectedVariant);
+    const variantKey = getVariantSignature(selectedVariant || {});
+    const variantStockValue = Number(
+      product?.variants?.stockMap?.[variantKey] ??
+      product?.variants?.stockMap?.get?.(variantKey)
+    );
+    const effectiveStock = Number.isFinite(variantStockValue)
+      ? variantStockValue
+      : Number(product.stockQuantity || 0);
+    if (effectiveStock <= 0) {
+      toast.error("Selected variant is out of stock");
+      return;
+    }
+    if (quantity > effectiveStock) {
+      toast.error(`Only ${effectiveStock} item(s) available for selected variant`);
+      return;
+    }
 
     const addedToCart = addItem({
       id: product.id,
@@ -294,7 +354,7 @@ const MobileProductDetail = () => {
       image: product.image,
       quantity: quantity,
       variant: selectedVariant,
-      stockQuantity: product.stockQuantity,
+      stockQuantity: effectiveStock,
       vendorId: product.vendorId,
       vendorName: vendor?.storeName || vendor?.name || product.vendorName,
     });
@@ -305,7 +365,7 @@ const MobileProductDetail = () => {
 
   const handleRemoveFromCart = () => {
     if (!product) return;
-    removeItem(product.id);
+    removeItem(product.id, selectedVariant || {});
     toast.success("Removed from cart!");
   };
 
@@ -329,24 +389,53 @@ const MobileProductDetail = () => {
 
   const handleQuantityChange = (change) => {
     const newQuantity = quantity + change;
-    if (newQuantity >= 1 && newQuantity <= (product.stockQuantity || 10)) {
+    const variantKey = getVariantSignature(selectedVariant || {});
+    const variantStockValue = Number(
+      product?.variants?.stockMap?.[variantKey] ??
+      product?.variants?.stockMap?.get?.(variantKey)
+    );
+    const maxStock = Number.isFinite(variantStockValue)
+      ? Math.max(0, variantStockValue)
+      : Number(product?.stockQuantity || 0);
+    if (newQuantity >= 1 && newQuantity <= (maxStock || 10)) {
       setQuantity(newQuantity);
     }
   };
 
   const productImages = useMemo(() => {
     if (!product) return [];
+    const selectedVariantKey = getVariantSignature(selectedVariant || {});
+    const variantImage = String(
+      product?.variants?.imageMap?.[selectedVariantKey] ||
+      product?.variants?.imageMap?.get?.(selectedVariantKey) ||
+      ""
+    ).trim();
     const images =
       Array.isArray(product.images) && product.images.length > 0
         ? product.images.filter(Boolean)
         : product.image
           ? [product.image]
           : [];
+    if (variantImage) {
+      return [variantImage, ...images.filter((img) => img !== variantImage)];
+    }
     return images;
-  }, [product]);
+  }, [product, selectedVariant]);
 
   const currentPrice = useMemo(() => {
     return resolveVariantPrice(product, selectedVariant);
+  }, [product, selectedVariant]);
+
+  const selectedAvailableStock = useMemo(() => {
+    const variantKey = getVariantSignature(selectedVariant || {});
+    const variantStockValue = Number(
+      product?.variants?.stockMap?.[variantKey] ??
+      product?.variants?.stockMap?.get?.(variantKey)
+    );
+    if (Number.isFinite(variantStockValue)) {
+      return Math.max(0, variantStockValue);
+    }
+    return Number(product?.stockQuantity || 0);
   }, [product, selectedVariant]);
 
   const productFaqs = useMemo(() => {
@@ -557,13 +646,13 @@ const MobileProductDetail = () => {
                         </span>
                         <button
                           onClick={() => handleQuantityChange(1)}
-                          disabled={quantity >= (product.stockQuantity || 10)}
+                          disabled={quantity >= (selectedAvailableStock || 10)}
                           className="w-10 h-10 flex items-center justify-center rounded-lg bg-white shadow-sm hover:shadow-md disabled:shadow-none disabled:bg-transparent disabled:opacity-50 transition-all text-gray-700">
                           <FiPlus />
                         </button>
                       </div>
                       <span className="text-sm text-gray-500">
-                        {product.stockQuantity} {product.unit}s available
+                        {selectedAvailableStock} {product.unit}s available
                       </span>
                     </div>
                   </div>

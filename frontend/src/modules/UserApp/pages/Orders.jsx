@@ -12,10 +12,11 @@ import toast from 'react-hot-toast';
 
 const MobileOrders = () => {
   const navigate = useNavigate();
-  const { getAllOrders, fetchUserOrders, isLoading } = useOrderStore();
+  const { getAllOrders, fetchUserOrders, isLoading, orderPagination } = useOrderStore();
   const { user } = useAuthStore();
   const [selectedStatus, setSelectedStatus] = useState('all');
   const [showFilter, setShowFilter] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
 
   const statusOptions = [
     { value: 'all', label: 'All Orders' },
@@ -30,7 +31,7 @@ const MobileOrders = () => {
 
   useEffect(() => {
     if (user?.id) {
-      fetchUserOrders(1, 50).catch(() => null);
+      fetchUserOrders(1, 20).catch(() => null);
     }
   }, [user?.id, fetchUserOrders]);
 
@@ -42,8 +43,22 @@ const MobileOrders = () => {
   // Pull to refresh handler
   const handleRefresh = async () => {
     if (!user?.id) return;
-    await fetchUserOrders(1, 50);
+    await fetchUserOrders(1, 20);
     toast.success('Orders refreshed');
+  };
+
+  const hasMore = orderPagination.page < orderPagination.pages;
+
+  const handleLoadMore = async () => {
+    if (!user?.id || !hasMore || isLoadingMore) return;
+    setIsLoadingMore(true);
+    try {
+      await fetchUserOrders(orderPagination.page + 1, 20);
+    } catch {
+      toast.error('Failed to load more orders');
+    } finally {
+      setIsLoadingMore(false);
+    }
   };
 
   const {
@@ -149,6 +164,17 @@ const MobileOrders = () => {
                       <MobileOrderCard order={order} />
                     </motion.div>
                   ))}
+                  {selectedStatus === 'all' && hasMore && (
+                    <div className="pt-4">
+                      <button
+                        onClick={handleLoadMore}
+                        disabled={isLoadingMore}
+                        className="w-full py-3 bg-white border border-gray-200 text-gray-700 rounded-xl font-semibold hover:bg-gray-50 transition-colors disabled:opacity-60"
+                      >
+                        {isLoadingMore ? 'Loading...' : 'Load More Orders'}
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

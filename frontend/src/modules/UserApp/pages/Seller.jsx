@@ -166,7 +166,7 @@ const Seller = () => {
             try {
                 const [vendorRes, productsRes] = await Promise.all([
                     api.get(`/vendors/${vendorId}`),
-                    api.get(`/vendors/${vendorId}/products`, { params: { page: 1, limit: 200 } }),
+                    api.get(`/vendors/${vendorId}/products`, { params: { page: 1, limit: 100 } }),
                 ]);
 
                 if (!active) return;
@@ -174,9 +174,21 @@ const Seller = () => {
                 const vendorPayload = vendorRes?.data ?? vendorRes;
                 const productsPayload = productsRes?.data ?? productsRes;
                 const vendorDoc = vendorPayload ? normalizeVendor(vendorPayload) : null;
-                const productList = Array.isArray(productsPayload?.products)
-                    ? productsPayload.products.map(normalizeProduct)
+                const allProducts = Array.isArray(productsPayload?.products)
+                    ? [...productsPayload.products]
                     : [];
+                const totalPages = Math.max(1, Number(productsPayload?.pages || 1));
+                for (let page = 2; page <= totalPages; page += 1) {
+                    const nextRes = await api.get(`/vendors/${vendorId}/products`, {
+                        params: { page, limit: 100 },
+                    });
+                    const nextPayload = nextRes?.data ?? nextRes;
+                    if (Array.isArray(nextPayload?.products) && nextPayload.products.length) {
+                        allProducts.push(...nextPayload.products);
+                    }
+                }
+
+                const productList = allProducts.map(normalizeProduct);
 
                 setRemoteVendor(vendorDoc);
                 setRemoteProducts(productList);

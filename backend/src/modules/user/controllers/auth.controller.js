@@ -17,6 +17,20 @@ import {
     rotateRefreshSession,
 } from '../../../services/refreshToken.service.js';
 
+const extractCloudinaryPublicId = (url = '') => {
+    const raw = String(url || '').trim();
+    if (!raw || !raw.includes('/upload/')) return null;
+    try {
+        const afterUpload = raw.split('/upload/')[1] || '';
+        const withoutTransform = afterUpload.includes('/') ? afterUpload.substring(afterUpload.indexOf('/') + 1) : afterUpload;
+        const cleaned = withoutTransform.replace(/^v\d+\//, '');
+        const withoutExtension = cleaned.replace(/\.[^/.]+$/, '');
+        return withoutExtension || null;
+    } catch {
+        return null;
+    }
+};
+
 // POST /api/user/auth/register
 export const register = asyncHandler(async (req, res) => {
     const { name, email, password, phone } = req.body;
@@ -274,12 +288,21 @@ export const uploadProfileAvatar = asyncHandler(async (req, res) => {
             'users/avatars'
         );
 
+        const existingUser = await User.findById(req.user.id).select('avatar');
+        if (!existingUser) throw new ApiError(404, 'User not found.');
+        const previousAvatar = String(existingUser.avatar || '').trim();
+
         const user = await User.findByIdAndUpdate(
             req.user.id,
             { avatar: uploaded.url },
             { new: true, runValidators: true }
         );
         if (!user) throw new ApiError(404, 'User not found.');
+
+        const previousPublicId = extractCloudinaryPublicId(previousAvatar);
+        if (previousPublicId && previousPublicId !== uploaded.publicId) {
+            await deleteFromCloudinary(previousPublicId).catch(() => null);
+        }
 
         return res.status(200).json(
             new ApiResponse(

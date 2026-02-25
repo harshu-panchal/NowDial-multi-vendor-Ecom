@@ -19,8 +19,18 @@ const DeliveryProtectedRoute = ({ children }) => {
   const accessToken = token || localStorage.getItem('delivery-token');
   const payload = decodeJwtPayload(accessToken);
   const role = String(payload?.role || '').toLowerCase();
+  const tokenExpiryMs =
+    typeof payload?.exp === 'number' ? payload.exp * 1000 : null;
+  const isExpired = tokenExpiryMs ? Date.now() >= tokenExpiryMs : false;
 
   if (!isAuthenticated || !accessToken) {
+    return <Navigate to="/delivery/login" state={{ from: location }} replace />;
+  }
+
+  if (isExpired) {
+    localStorage.removeItem('delivery-token');
+    localStorage.removeItem('delivery-refresh-token');
+    localStorage.removeItem('delivery-auth-storage');
     return <Navigate to="/delivery/login" state={{ from: location }} replace />;
   }
 

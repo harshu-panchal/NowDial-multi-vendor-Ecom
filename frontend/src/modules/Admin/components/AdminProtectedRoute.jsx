@@ -19,8 +19,18 @@ const AdminProtectedRoute = ({ children }) => {
   const accessToken = token || localStorage.getItem('adminToken');
   const payload = decodeJwtPayload(accessToken);
   const role = String(payload?.role || '').toLowerCase();
+  const tokenExpiryMs =
+    typeof payload?.exp === 'number' ? payload.exp * 1000 : null;
+  const isExpired = tokenExpiryMs ? Date.now() >= tokenExpiryMs : false;
 
   if (!isAuthenticated || !accessToken) {
+    return <Navigate to="/admin/login" state={{ from: location }} replace />;
+  }
+
+  if (isExpired) {
+    localStorage.removeItem('adminToken');
+    localStorage.removeItem('adminRefreshToken');
+    localStorage.removeItem('admin-auth-storage');
     return <Navigate to="/admin/login" state={{ from: location }} replace />;
   }
 

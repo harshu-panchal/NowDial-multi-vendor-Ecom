@@ -350,7 +350,7 @@ const MobileProfile = () => {
                       </div>
                       <div>
                         <p className="text-gray-600 text-sm mb-1">Profile Picture</p>
-                        <p className="text-xs text-gray-500">JPG, PNG or GIF. Max size 2MB</p>
+                        <p className="text-xs text-gray-500">JPG, PNG or GIF. Max size 5MB</p>
                       </div>
                     </div>
 

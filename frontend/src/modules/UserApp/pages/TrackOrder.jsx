@@ -4,6 +4,7 @@ import { FiCheckCircle, FiClock, FiPackage, FiTruck, FiMapPin, FiArrowLeft } fro
 import MobileLayout from "../components/Layout/MobileLayout";
 import { useOrderStore } from '../../../shared/store/orderStore';
 import { formatPrice } from '../../../shared/utils/helpers';
+import { formatVariantLabel } from '../../../shared/utils/variant';
 import PageTransition from '../../../shared/components/PageTransition';
 import Badge from '../../../shared/components/Badge';
 import LazyImage from '../../../shared/components/LazyImage';
@@ -236,6 +237,11 @@ const MobileTrackOrder = () => {
                         <p className="text-xs text-gray-600">
                           {formatPrice(item.price)} x {item.quantity}
                         </p>
+                        {formatVariantLabel(item?.variant) && (
+                          <p className="text-[11px] text-gray-500">
+                            {formatVariantLabel(item?.variant)}
+                          </p>
+                        )}
                       </div>
                       <p className="font-bold text-gray-800 text-sm">
                         {formatPrice(item.price * item.quantity)}

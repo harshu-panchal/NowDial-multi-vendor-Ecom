@@ -1,10 +1,11 @@
-import { useState, useRef, useEffect } from "react";
+﻿import { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
 import { FiTrash2, FiMinus, FiPlus, FiHeart, FiAlertCircle } from "react-icons/fi";
 import { toast } from "react-hot-toast";
 import { useCartStore } from "../../store/useStore";
 import { useWishlistStore } from "../../store/wishlistStore";
 import { formatPrice } from "../../utils/helpers";
+import { formatVariantLabel } from "../../utils/variant";
 import useSwipeGesture from "../../../modules/UserApp/hooks/useSwipeGesture";
 
 const SwipeableCartItem = ({ item, index }) => {
@@ -135,6 +136,11 @@ const SwipeableCartItem = ({ item, index }) => {
                     <p className="text-sm font-bold text-primary-600 mb-2">
                         {formatPrice(item.price)}
                     </p>
+                    {formatVariantLabel(item?.variant) && (
+                        <p className="text-xs text-gray-500 mb-2">
+                            {formatVariantLabel(item?.variant)}
+                        </p>
+                    )}
 
                     {/* Stock Warning */}
                     {isLowStock() && (
@@ -209,3 +215,6 @@ const SwipeableCartItem = ({ item, index }) => {
 };
 
 export default SwipeableCartItem;
+
+
+

@@ -19,6 +19,7 @@ import {
 
 const router = Router();
 const deliveryAuth = [authenticate, authorize('delivery'), enforceAccountStatus];
+const IS_PRODUCTION = String(process.env.NODE_ENV || '').toLowerCase() === 'production';
 
 // Auth
 router.post(
@@ -43,7 +44,9 @@ router.put('/auth/profile', ...deliveryAuth, authController.updateProfile);
 // Orders
 router.get('/orders', ...deliveryAuth, orderController.getAssignedOrders);
 router.get('/orders/:id', ...deliveryAuth, orderController.getOrderDetail);
-router.get('/orders/:id/debug-otp', ...deliveryAuth, orderController.getDeliveryOtpForDebug);
+if (!IS_PRODUCTION) {
+    router.get('/orders/:id/debug-otp', ...deliveryAuth, orderController.getDeliveryOtpForDebug);
+}
 router.patch('/orders/:id/status', ...deliveryAuth, orderController.updateDeliveryStatus);
 router.post('/orders/:id/resend-delivery-otp', ...deliveryAuth, orderController.resendDeliveryOtp);
 

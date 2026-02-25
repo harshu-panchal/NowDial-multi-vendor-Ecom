@@ -3,6 +3,9 @@ import toast from "react-hot-toast";
 import api from "../../../shared/utils/api";
 import { useAuthStore } from "../../../shared/store/authStore";
 
+const getAuthUserId = (authState) =>
+  String(authState?.user?._id || authState?.user?.id || "");
+
 const normalizePayload = (response) => {
   const root = response?.data ?? response ?? {};
   if (Array.isArray(root)) {
@@ -27,9 +30,11 @@ export const useUserNotificationStore = create((set, get) => ({
   page: 1,
   hasMore: true,
   hasFetched: false,
+  hydratedForUserId: "",
 
   fetchNotifications: async (page = 1) => {
     const authState = useAuthStore.getState();
+    const authUserId = getAuthUserId(authState);
     if (!authState?.isAuthenticated) {
       set({
         notifications: [],
@@ -38,6 +43,7 @@ export const useUserNotificationStore = create((set, get) => ({
         page: 1,
         hasMore: false,
         hasFetched: false,
+        hydratedForUserId: "",
       });
       return;
     }
@@ -57,6 +63,7 @@ export const useUserNotificationStore = create((set, get) => ({
         page: Number(page),
         hasMore: Number(page) < Number(payload.pages || 1),
         hasFetched: true,
+        hydratedForUserId: authUserId,
         isLoading: false,
       }));
     } catch (error) {
@@ -68,8 +75,10 @@ export const useUserNotificationStore = create((set, get) => ({
   ensureHydrated: async () => {
     const authState = useAuthStore.getState();
     if (!authState?.isAuthenticated) return;
+    const authUserId = getAuthUserId(authState);
     const state = get();
-    if (!state.hasFetched && !state.isLoading) {
+    const isDifferentUser = state.hydratedForUserId !== authUserId;
+    if ((!state.hasFetched || isDifferentUser) && !state.isLoading) {
       await get().fetchNotifications(1);
     }
   },
@@ -141,7 +150,7 @@ export const useUserNotificationStore = create((set, get) => ({
       page: 1,
       hasMore: true,
       hasFetched: false,
+      hydratedForUserId: "",
     });
   },
 }));
-

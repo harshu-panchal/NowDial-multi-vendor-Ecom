@@ -38,49 +38,119 @@ const uniqueAxisValues = (values = []) => {
 
 const createVariantKey = (size = '', color = '') =>
     `${normalizeVariantPart(size)}|${normalizeVariantPart(color)}`;
+const normalizeAxisName = (value) =>
+    String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, '_');
+const createDynamicVariantKey = (selection = {}) =>
+    Object.entries(selection || {})
+        .map(([axis, value]) => [normalizeAxisName(axis), normalizeVariantPart(value)])
+        .filter(([axis, value]) => axis && value)
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([axis, value]) => `${axis}=${value}`)
+        .join('|');
+
+const toObjectEntries = (value) => {
+    if (!value) return [];
+    if (value instanceof Map) return Array.from(value.entries());
+    if (typeof value === 'object') return Object.entries(value);
+    return [];
+};
+
+const toNonNegativeNumber = (raw) => {
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+};
+
+const normalizeAttributes = (rawAttributes = []) => {
+    const seen = new Set();
+    const attributes = [];
+    for (const raw of rawAttributes || []) {
+        const name = String(raw?.name || '').trim();
+        const axisKey = normalizeAxisName(name);
+        if (!name || !axisKey || seen.has(axisKey)) continue;
+        seen.add(axisKey);
+        const values = uniqueAxisValues(raw?.values || []);
+        if (!values.length) continue;
+        attributes.push({ name, axisKey, values });
+    }
+    return attributes;
+};
+
+const buildCombinationsFromAttributes = (attributes = []) => {
+    if (!attributes.length) return [];
+    let combos = [{}];
+    attributes.forEach((attr) => {
+        const next = [];
+        combos.forEach((selection) => {
+            attr.values.forEach((value) => next.push({ ...selection, [attr.axisKey]: value }));
+        });
+        combos = next;
+    });
+    return combos;
+};
 
 const normalizeVariantsPayload = (rawVariants = {}, fallbackPrice) => {
     if (!rawVariants || typeof rawVariants !== 'object') {
-        return { sizes: [], colors: [], prices: {}, defaultVariant: {} };
+        return { sizes: [], colors: [], attributes: [], prices: {}, stockMap: {}, imageMap: {}, defaultVariant: {}, defaultSelection: {} };
     }
 
     const sizes = uniqueAxisValues(rawVariants.sizes || []);
     const colors = uniqueAxisValues(rawVariants.colors || []);
+    const attributes = normalizeAttributes(rawVariants.attributes || []);
     const hasSizeAxis = sizes.length > 0;
     const hasColorAxis = colors.length > 0;
-    const hasAnyAxis = hasSizeAxis || hasColorAxis;
+    const hasDynamicAxes = attributes.length > 0;
+    const hasAnyAxis = hasDynamicAxes || hasSizeAxis || hasColorAxis;
 
     if (!hasAnyAxis) {
-        return { sizes: [], colors: [], prices: {}, defaultVariant: {} };
+        return { sizes: [], colors: [], attributes: [], prices: {}, stockMap: {}, imageMap: {}, defaultVariant: {}, defaultSelection: {} };
     }
 
     const combinations = [];
-    if (hasSizeAxis && hasColorAxis) {
-        sizes.forEach((size) => colors.forEach((color) => combinations.push({ size, color })));
+    if (hasDynamicAxes) {
+        buildCombinationsFromAttributes(attributes).forEach((selection) => combinations.push({ selection }));
+    } else if (hasSizeAxis && hasColorAxis) {
+        sizes.forEach((size) => colors.forEach((color) => combinations.push({ selection: { size, color } })));
     } else if (hasSizeAxis) {
-        sizes.forEach((size) => combinations.push({ size, color: '' }));
+        sizes.forEach((size) => combinations.push({ selection: { size } }));
     } else {
-        colors.forEach((color) => combinations.push({ size: '', color }));
+        colors.forEach((color) => combinations.push({ selection: { color } }));
     }
 
-    const pricesSource =
-        rawVariants.prices instanceof Map
-            ? Object.fromEntries(rawVariants.prices)
-            : (typeof rawVariants.prices === 'object' && rawVariants.prices !== null ? rawVariants.prices : {});
+    const pricesSource = Object.fromEntries(toObjectEntries(rawVariants.prices));
+    const stockSource = Object.fromEntries(toObjectEntries(rawVariants.stockMap));
+    const imageSource = Object.fromEntries(toObjectEntries(rawVariants.imageMap));
     const prices = {};
+    const stockMap = {};
+    const imageMap = {};
 
-    combinations.forEach(({ size, color }) => {
-        const key = createVariantKey(size, color);
+    combinations.forEach(({ selection }) => {
+        const size = String(selection?.size || '');
+        const color = String(selection?.color || '');
+        const key = hasDynamicAxes
+            ? createDynamicVariantKey(selection)
+            : createVariantKey(size, color);
         const rawPrice = pricesSource[key];
         const parsedPrice = Number(rawPrice);
         if (Number.isFinite(parsedPrice) && parsedPrice >= 0) {
             prices[key] = parsedPrice;
-            return;
+        } else {
+            const fallback = Number(fallbackPrice);
+            if (Number.isFinite(fallback) && fallback >= 0) {
+                prices[key] = fallback;
+            }
         }
 
-        const fallback = Number(fallbackPrice);
-        if (Number.isFinite(fallback) && fallback >= 0) {
-            prices[key] = fallback;
+        const parsedStock = toNonNegativeNumber(stockSource[key]);
+        if (parsedStock !== null) {
+            stockMap[key] = parsedStock;
+        }
+
+        const image = String(imageSource[key] || '').trim();
+        if (image) {
+            imageMap[key] = image;
         }
     });
 
@@ -95,15 +165,43 @@ const normalizeVariantsPayload = (rawVariants = {}, fallbackPrice) => {
         throw new ApiError(400, 'Default variant must exist in provided sizes/colors.');
     }
 
+    const defaultSelection = {};
+    if (rawVariants?.defaultSelection && typeof rawVariants.defaultSelection === 'object') {
+        Object.entries(rawVariants.defaultSelection).forEach(([axis, value]) => {
+            const axisKey = normalizeAxisName(axis);
+            const selectedValue = String(value || '').trim();
+            if (!axisKey || !selectedValue) return;
+            const axisMeta = attributes.find((attr) => attr.axisKey === axisKey);
+            if (!axisMeta) return;
+            const matched = axisMeta.values.find(
+                (candidate) => normalizeVariantPart(candidate) === normalizeVariantPart(selectedValue)
+            );
+            if (matched) defaultSelection[axisKey] = matched;
+        });
+    }
+
     return {
         sizes,
         colors,
+        attributes: attributes.map((attr) => ({ name: attr.name, values: attr.values })),
         prices,
+        stockMap,
+        imageMap,
         defaultVariant: {
             size: normalizedDefaultSize,
             color: normalizedDefaultColor,
         },
+        defaultSelection,
     };
+};
+
+const calculateVariantAggregateStock = (variants = {}) => {
+    const entries = toObjectEntries(variants.stockMap);
+    if (!entries.length) return null;
+    return entries.reduce((sum, [, value]) => {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) && parsed >= 0 ? sum + parsed : sum;
+    }, 0);
 };
 
 // GET /api/vendor/products
@@ -143,13 +241,16 @@ export const createProduct = asyncHandler(async (req, res) => {
     if (!Number.isFinite(lowStockThreshold) || lowStockThreshold < 0) {
         throw new ApiError(400, 'Invalid low stock threshold.');
     }
-    const stock = deriveStockStatus(stockQuantity, lowStockThreshold);
-
     const price = Number(rest.price);
     if (!Number.isFinite(price) || price < 0) {
         throw new ApiError(400, 'Invalid product price.');
     }
     const normalizedVariants = normalizeVariantsPayload(rest.variants, price);
+    const variantAggregateStock = calculateVariantAggregateStock(normalizedVariants);
+    const finalStockQuantity = Number.isFinite(variantAggregateStock)
+        ? variantAggregateStock
+        : stockQuantity;
+    const stock = deriveStockStatus(finalStockQuantity, lowStockThreshold);
 
     const product = await Product.create({
         name,
@@ -159,7 +260,7 @@ export const createProduct = asyncHandler(async (req, res) => {
         price,
         variants: normalizedVariants,
         faqs: sanitizeFaqs(rest.faqs),
-        stockQuantity,
+        stockQuantity: finalStockQuantity,
         lowStockThreshold,
         stock,
     });
@@ -196,6 +297,10 @@ export const updateProduct = asyncHandler(async (req, res) => {
     }
     if (Object.prototype.hasOwnProperty.call(req.body, 'variants')) {
         product.variants = normalizeVariantsPayload(req.body.variants, product.price);
+        const variantAggregateStock = calculateVariantAggregateStock(product.variants);
+        if (Number.isFinite(variantAggregateStock)) {
+            product.stockQuantity = variantAggregateStock;
+        }
     }
     // Keep stock state deterministic from quantity + threshold.
     product.stock = deriveStockStatus(

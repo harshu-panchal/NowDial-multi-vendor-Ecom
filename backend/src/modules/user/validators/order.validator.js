@@ -6,7 +6,7 @@ export const placeOrderSchema = Joi.object({
             productId: Joi.string().required(),
             quantity: Joi.number().integer().min(1).required(),
             price: Joi.number().optional(),
-            variant: Joi.object({ size: Joi.string(), color: Joi.string() }).optional(),
+            variant: Joi.object().pattern(Joi.string(), Joi.alternatives().try(Joi.string(), Joi.number(), Joi.boolean())).optional(),
         })
     ).min(1).required(),
     shippingAddress: Joi.object({

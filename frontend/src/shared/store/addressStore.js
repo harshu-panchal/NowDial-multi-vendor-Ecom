@@ -111,10 +111,16 @@ export const useAddressStore = create(
           set((state) => {
             const remaining = state.addresses.filter((addr) => String(addr.id) !== deletedId);
             if (deletedAddress?.isDefault && remaining.length > 0) {
+              const promoted = [...remaining].sort((a, b) => {
+                const aTs = new Date(a?.createdAt || 0).getTime();
+                const bTs = new Date(b?.createdAt || 0).getTime();
+                return bTs - aTs;
+              })[0];
+              const promotedId = String(promoted?.id || '');
               return {
-                addresses: remaining.map((addr, index) => ({
+                addresses: remaining.map((addr) => ({
                   ...addr,
-                  isDefault: index === 0,
+                  isDefault: String(addr.id) === promotedId,
                 })),
                 isLoading: false,
               };

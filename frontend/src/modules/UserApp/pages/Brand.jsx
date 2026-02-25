@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { FiFilter, FiArrowLeft, FiGrid, FiList, FiX, FiSearch } from "react-icons/fi";
+import { FiFilter, FiArrowLeft, FiGrid, FiList, FiX, FiSearch, FiTag } from "react-icons/fi";
 import { motion, AnimatePresence } from "framer-motion";
 import MobileLayout from "../components/Layout/MobileLayout";
 import ProductCard from "../../../shared/components/ProductCard";
@@ -33,6 +33,27 @@ const normalizeProduct = (raw) => ({
     reviewCount: Number(raw?.reviewCount) || 0,
 });
 
+const sortProducts = (products = [], sortBy = "newest") => {
+    const list = Array.isArray(products) ? [...products] : [];
+    switch (sortBy) {
+        case "price-asc":
+            return list.sort((a, b) => Number(a?.price || 0) - Number(b?.price || 0));
+        case "price-desc":
+            return list.sort((a, b) => Number(b?.price || 0) - Number(a?.price || 0));
+        case "rating":
+            return list.sort((a, b) => Number(b?.rating || 0) - Number(a?.rating || 0));
+        case "popular":
+            return list.sort((a, b) => Number(b?.reviewCount || 0) - Number(a?.reviewCount || 0));
+        case "newest":
+        default:
+            return list.sort((a, b) => {
+                const aTime = new Date(a?.createdAt || 0).getTime();
+                const bTime = new Date(b?.createdAt || 0).getTime();
+                return bTime - aTime;
+            });
+    }
+};
+
 const Brand = () => {
     const { id } = useParams();
     const navigate = useNavigate();
@@ -51,6 +72,7 @@ const Brand = () => {
     const [showFilters, setShowFilters] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
     const [viewMode, setViewMode] = useState("grid"); // 'grid' or 'list'
+    const [sortBy, setSortBy] = useState("newest");
     const [filters, setFilters] = useState({
         minPrice: "",
         maxPrice: "",
@@ -99,8 +121,8 @@ const Brand = () => {
             );
         }
 
-        return result;
-    }, [rawBrandProducts, filters, searchQuery]);
+        return sortProducts(result, sortBy);
+    }, [rawBrandProducts, filters, searchQuery, sortBy]);
 
     const { displayedItems, hasMore, isLoading, loadMore, loadMoreRef } =
         useInfiniteScroll(brandProducts, 10, 10);
@@ -118,6 +140,7 @@ const Brand = () => {
             minRating: "",
         });
         setSearchQuery("");
+        setSortBy("newest");
     };
 
     // Check if any filter is active
@@ -172,7 +195,7 @@ const Brand = () => {
             try {
                 const [brandsRes, productsRes] = await Promise.all([
                     api.get("/brands/all"),
-                    api.get("/products", { params: { brand: brandId, page: 1, limit: 200 } }),
+                    api.get("/products", { params: { brand: brandId, page: 1, limit: 100, sort: sortBy } }),
                 ]);
 
                 if (!active) return;
@@ -184,9 +207,25 @@ const Brand = () => {
                     : [];
                 const matchedBrand =
                     brandsList.find((item) => String(item.id) === String(brandId)) || null;
-                const productList = Array.isArray(productsPayload?.products)
-                    ? productsPayload.products.map(normalizeProduct)
+                const allProducts = Array.isArray(productsPayload?.products)
+                    ? [...productsPayload.products]
                     : [];
+                const totalPages = Math.max(1, Number(productsPayload?.pages || 1));
+
+                for (let page = 2; page <= totalPages; page += 1) {
+                    const nextRes = await api.get("/products", {
+                        params: { brand: brandId, page, limit: 100, sort: sortBy },
+                    });
+                    const nextPayload = nextRes?.data ?? nextRes;
+                    if (Array.isArray(nextPayload?.products) && nextPayload.products.length) {
+                        allProducts.push(...nextPayload.products);
+                    }
+                }
+
+                const productList = sortProducts(
+                    allProducts.map(normalizeProduct),
+                    sortBy
+                );
 
                 setRemoteBrand(matchedBrand);
                 setRemoteProducts(productList);
@@ -203,7 +242,7 @@ const Brand = () => {
         return () => {
             active = false;
         };
-    }, [brandId]);
+    }, [brandId, sortBy]);
 
     if (isResolvingBrand) {
         return (
@@ -358,6 +397,22 @@ const Brand = () => {
                                                         {/* Filter Content */}
                                                         <div className="max-h-[50vh] overflow-y-auto scrollbar-hide">
                                                             <div className="p-2 space-y-2">
+                                                                <div>
+                                                                    <h4 className="font-semibold text-gray-700 mb-1 text-xs">
+                                                                        Sort By
+                                                                    </h4>
+                                                                    <select
+                                                                        value={sortBy}
+                                                                        onChange={(e) => setSortBy(e.target.value)}
+                                                                        className="w-full px-2 py-1.5 rounded-md border border-gray-200 bg-white focus:outline-none focus:ring-1 focus:ring-primary-500 text-xs"
+                                                                    >
+                                                                        <option value="newest">Newest</option>
+                                                                        <option value="popular">Most Popular</option>
+                                                                        <option value="rating">Top Rated</option>
+                                                                        <option value="price-asc">Price: Low to High</option>
+                                                                        <option value="price-desc">Price: High to Low</option>
+                                                                    </select>
+                                                                </div>
                                                                 {/* Price Range */}
                                                                 <div>
                                                                     <h4 className="font-semibold text-gray-700 mb-1 text-xs">
@@ -461,7 +516,9 @@ const Brand = () => {
                     <div className="px-4 py-4 lg:p-6">
                         {brandProducts.length === 0 ? (
                             <div className="text-center py-12">
-                                <div className="text-6xl text-gray-300 mx-auto mb-4">🏷️</div>
+                                <div className="text-6xl text-gray-300 mx-auto mb-4 flex justify-center">
+                                    <FiTag />
+                                </div>
                                 <h3 className="text-xl font-bold text-gray-800 mb-2">
                                     No products found
                                 </h3>
@@ -545,3 +602,4 @@ const Brand = () => {
 };
 
 export default Brand;
+

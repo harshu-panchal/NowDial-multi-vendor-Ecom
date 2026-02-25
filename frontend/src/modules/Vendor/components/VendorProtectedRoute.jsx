@@ -19,8 +19,18 @@ const VendorProtectedRoute = ({ children }) => {
   const accessToken = token || localStorage.getItem('vendor-token');
   const payload = decodeJwtPayload(accessToken);
   const role = String(payload?.role || '').toLowerCase();
+  const tokenExpiryMs =
+    typeof payload?.exp === 'number' ? payload.exp * 1000 : null;
+  const isExpired = tokenExpiryMs ? Date.now() >= tokenExpiryMs : false;
 
   if (!isAuthenticated || !accessToken) {
+    return <Navigate to="/vendor/login" state={{ from: location }} replace />;
+  }
+
+  if (isExpired) {
+    localStorage.removeItem('vendor-token');
+    localStorage.removeItem('vendor-refresh-token');
+    localStorage.removeItem('vendor-auth-storage');
     return <Navigate to="/vendor/login" state={{ from: location }} replace />;
   }
 

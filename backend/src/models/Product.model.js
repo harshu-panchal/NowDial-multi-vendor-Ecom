@@ -27,10 +27,20 @@ const productSchema = new mongoose.Schema(
             sizes: [String],
             colors: [String],
             materials: [String],
+            attributes: [{
+                name: String,
+                values: [String],
+            }],
             prices: { type: Map, of: Number },
+            stockMap: { type: Map, of: Number },
+            imageMap: { type: Map, of: String },
             defaultVariant: {
                 size: String,
                 color: String,
+            },
+            defaultSelection: {
+                type: Map,
+                of: String,
             },
         },
         flashSale: { type: Boolean, default: false, index: true },

@@ -29,6 +29,7 @@ const toPublicVendor = (vendorDoc) => {
 };
 
 const normalizeVariantPart = (value) => String(value || '').trim().toLowerCase();
+const normalizeVariantKey = (key) => String(key || '').trim().toLowerCase();
 
 const toVariantPriceEntries = (variantPrices) => {
     if (!variantPrices) return [];
@@ -41,12 +42,24 @@ const resolveVariantPrice = (product, selectedVariant) => {
     const basePrice = Number(product?.price);
     if (!Number.isFinite(basePrice) || basePrice < 0) return 0;
 
+    const selectionEntries = Object.entries(selectedVariant || {})
+        .map(([axis, value]) => [String(axis || '').trim(), String(value || '').trim()])
+        .filter(([axis, value]) => axis && value);
+
+    const dynamicKey = selectionEntries.length
+        ? selectionEntries
+            .map(([axis, value]) => `${normalizeVariantPart(axis)}=${normalizeVariantPart(value)}`)
+            .sort()
+            .join('|')
+        : '';
+
     const size = normalizeVariantPart(selectedVariant?.size);
     const color = normalizeVariantPart(selectedVariant?.color);
     const entries = toVariantPriceEntries(product?.variants?.prices);
-    if (!entries.length || (!size && !color)) return basePrice;
+    if (!entries.length || (!dynamicKey && !size && !color)) return basePrice;
 
     const candidateKeys = [
+        dynamicKey || null,
         `${size}|${color}`,
         `${size}-${color}`,
         `${size}_${color}`,
@@ -56,6 +69,7 @@ const resolveVariantPrice = (product, selectedVariant) => {
     ].filter(Boolean);
 
     for (const candidate of candidateKeys) {
+        if (!candidate) continue;
         const exact = entries.find(([rawKey]) => String(rawKey).trim() === candidate);
         if (exact) {
             const price = Number(exact[1]);
@@ -63,7 +77,7 @@ const resolveVariantPrice = (product, selectedVariant) => {
         }
 
         const normalized = entries.find(
-            ([rawKey]) => normalizeVariantPart(rawKey) === normalizeVariantPart(candidate)
+            ([rawKey]) => normalizeVariantKey(rawKey) === normalizeVariantKey(candidate)
         );
         if (normalized) {
             const price = Number(normalized[1]);
@@ -128,8 +142,60 @@ router.get('/flash-sale', asyncHandler(async (req, res) => {
 
 // GET /api/products/new-arrivals
 router.get('/new-arrivals', asyncHandler(async (req, res) => {
-    const products = await Product.find({ isActive: true, isNewArrival: true }).sort({ createdAt: -1 }).limit(20);
-    res.status(200).json(new ApiResponse(200, products, 'New arrivals.'));
+    const {
+        page = 1,
+        limit = 20,
+        sort = 'newest',
+        search,
+        q,
+        minPrice,
+        maxPrice,
+        minRating,
+    } = req.query;
+
+    const numericPage = Math.max(Number(page) || 1, 1);
+    const numericLimit = Math.max(Number(limit) || 20, 1);
+    const skip = (numericPage - 1) * numericLimit;
+
+    const filter = { isActive: true, isNewArrival: true };
+    const searchQuery = String(search || q || '').trim();
+    if (searchQuery) filter.$text = { $search: searchQuery };
+    if (minPrice || maxPrice) {
+        filter.price = {
+            ...(minPrice ? { $gte: Number(minPrice) } : {}),
+            ...(maxPrice ? { $lte: Number(maxPrice) } : {}),
+        };
+    }
+    if (minRating) {
+        filter.rating = { $gte: Number(minRating) };
+    }
+
+    const sortMap = {
+        newest: { createdAt: -1 },
+        oldest: { createdAt: 1 },
+        'price-asc': { price: 1 },
+        'price-desc': { price: -1 },
+        popular: { reviewCount: -1 },
+        rating: { rating: -1 },
+    };
+
+    const [products, total] = await Promise.all([
+        Product.find(filter)
+            .populate('categoryId', 'name')
+            .populate('brandId', 'name')
+            .populate('vendorId', 'storeName')
+            .sort(sortMap[sort] || sortMap.newest)
+            .skip(skip)
+            .limit(numericLimit),
+        Product.countDocuments(filter),
+    ]);
+
+    res.status(200).json(new ApiResponse(200, {
+        products,
+        total,
+        page: numericPage,
+        pages: Math.ceil(total / numericLimit),
+    }, 'New arrivals fetched.'));
 }));
 
 // GET /api/products/popular
@@ -202,7 +268,10 @@ router.get('/vendors/all', asyncHandler(async (req, res) => {
 
 // GET /api/vendors/:id (public)
 router.get('/vendors/:id', asyncHandler(async (req, res) => {
-    const vendor = await Vendor.findById(req.params.id).select('-password -otp -otpExpiry');
+    const vendor = await Vendor.findOne({
+        _id: req.params.id,
+        status: 'approved',
+    }).select('-password -otp -otpExpiry');
     if (!vendor) throw new ApiError(404, 'Vendor not found.');
     res.status(200).json(new ApiResponse(200, toPublicVendor(vendor), 'Vendor detail fetched.'));
 }));
@@ -222,6 +291,12 @@ router.get('/vendors/:id/products', asyncHandler(async (req, res) => {
         popular: { reviewCount: -1 },
         rating: { rating: -1 },
     };
+
+    const vendor = await Vendor.findOne({
+        _id: req.params.id,
+        status: 'approved',
+    }).select('_id');
+    if (!vendor) throw new ApiError(404, 'Vendor not found.');
 
     const filter = { isActive: true, vendorId: req.params.id };
     const products = await Product.find(filter)
@@ -269,6 +344,24 @@ router.post('/coupons/validate', asyncHandler(async (req, res) => {
     }
 
     res.status(200).json(new ApiResponse(200, { coupon: { code: coupon.code, type: coupon.type, value: coupon.value }, discount }, 'Coupon is valid.'));
+}));
+
+// GET /api/coupons/available
+router.get('/coupons/available', asyncHandler(async (req, res) => {
+    const now = new Date();
+    const coupons = await Coupon.find({
+        isActive: true,
+        $and: [
+            { $or: [{ startsAt: null }, { startsAt: { $exists: false } }, { startsAt: { $lte: now } }] },
+            { $or: [{ expiresAt: null }, { expiresAt: { $exists: false } }, { expiresAt: { $gte: now } }] }
+        ]
+    })
+        .select('code name type value minOrderValue maxDiscount expiresAt usageLimit usedCount')
+        .sort({ createdAt: -1 })
+        .limit(30)
+        .lean();
+
+    res.status(200).json(new ApiResponse(200, coupons, 'Available coupons fetched.'));
 }));
 
 // POST /api/shipping/estimate
@@ -421,8 +514,7 @@ router.get('/orders/track/:id', asyncHandler(async (req, res) => {
     res.status(200).json(new ApiResponse(200, order, 'Order tracking info.'));
 }));
 
-// Legacy support: GET /api/:id
-// Kept at the end so it does not shadow static routes like /banners, /vendors/all, etc.
-router.get('/:id', getProductDetail);
+// Legacy support: GET /api/:id (only ObjectId-like values to avoid swallowing unknown routes)
+router.get('/:id([a-fA-F0-9]{24})', getProductDetail);
 
 export default router;

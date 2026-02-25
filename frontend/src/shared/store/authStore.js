@@ -196,6 +196,7 @@ export const useAuthStore = create(
         localStorage.removeItem('refresh-token');
         localStorage.removeItem('cart-storage');
         localStorage.removeItem('wishlist-storage');
+        localStorage.removeItem('address-storage');
       },
 
       // Update user profile

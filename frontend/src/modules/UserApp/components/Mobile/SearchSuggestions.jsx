@@ -32,8 +32,6 @@ const SearchSuggestions = ({
     };
   }, [isOpen, onClose]);
 
-  if (!isOpen) return null;
-
   useEffect(() => {
     let cancelled = false;
 
@@ -74,6 +72,8 @@ const SearchSuggestions = ({
       cancelled = true;
     };
   }, [isOpen, trimmedQuery]);
+
+  if (!isOpen) return null;
 
   return (
     <AnimatePresence>

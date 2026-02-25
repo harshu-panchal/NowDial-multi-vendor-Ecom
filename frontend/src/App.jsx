@@ -615,7 +615,7 @@ const AppRoutes = () => {
         <Route path="settings/shipping-settings" element={<VendorSettings />} />
         <Route path="profile" element={<VendorSettings />} />
       </Route>
-
+      <Route path="*" element={<Navigate to="/" replace />} />
 
     </Routes >
   );

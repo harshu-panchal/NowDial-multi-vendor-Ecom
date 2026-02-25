@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { FiPackage, FiTruck, FiMapPin, FiCreditCard, FiRotateCw, FiArrowLeft, FiShoppingBag } from 'react-icons/fi';
+import { FiPackage, FiTruck, FiMapPin, FiCreditCard, FiRotateCw, FiArrowLeft, FiShoppingBag, FiX } from 'react-icons/fi';
 import { motion } from 'framer-motion';
 import MobileLayout from "../components/Layout/MobileLayout";
 import { useOrderStore } from '../../../shared/store/orderStore';
 import { useCartStore } from '../../../shared/store/useStore';
 import { formatPrice } from '../../../shared/utils/helpers';
+import { formatVariantLabel, getVariantSignature } from '../../../shared/utils/variant';
 import toast from 'react-hot-toast';
 import PageTransition from '../../../shared/components/PageTransition';
 import Badge from '../../../shared/components/Badge';
@@ -17,9 +18,21 @@ const MobileOrderDetail = () => {
   const { getOrder, cancelOrder, fetchOrderById, requestReturn } = useOrderStore();
   const { addItem } = useCartStore();
   const [isResolving, setIsResolving] = useState(true);
+  const [showReturnModal, setShowReturnModal] = useState(false);
+  const [returnReason, setReturnReason] = useState('Product issue');
+  const [returnVendorId, setReturnVendorId] = useState('');
+  const [isSubmittingReturn, setIsSubmittingReturn] = useState(false);
   const order = getOrder(orderId);
   const shippingAddress = order?.shippingAddress || {};
   const orderItems = Array.isArray(order?.items) ? order.items : [];
+  const vendorOptions = Array.isArray(order?.vendorItems)
+    ? order.vendorItems
+      .map((group) => ({
+        id: String(group?.vendorId || ''),
+        name: group?.vendorName || 'Vendor',
+      }))
+      .filter((group) => group.id)
+    : [];
 
   useEffect(() => {
     let mounted = true;
@@ -89,6 +102,7 @@ const MobileOrderDetail = () => {
         price: item.price,
         image: item.image,
         quantity: item.quantity,
+        variant: item.variant || undefined,
       });
     });
     toast.success('Items added to cart!');
@@ -111,36 +125,46 @@ const MobileOrderDetail = () => {
     }
   };
 
-  const handleRequestReturn = async () => {
+  const openReturnModal = () => {
     if (order.status !== 'delivered') {
       toast.error('Return can only be requested for delivered orders');
       return;
     }
+    if (vendorOptions.length === 1) {
+      setReturnVendorId(vendorOptions[0].id);
+    } else if (!vendorOptions.find((v) => v.id === returnVendorId)) {
+      setReturnVendorId(vendorOptions[0]?.id || '');
+    }
+    setShowReturnModal(true);
+  };
 
-    const reason = window.prompt('Enter return reason (minimum 5 characters):', 'Product issue');
-    if (!reason) return;
-    if (reason.trim().length < 5) {
+  const handleRequestReturn = async () => {
+    if (isSubmittingReturn) return;
+
+    const reason = String(returnReason || '').trim();
+    if (reason.length < 5) {
       toast.error('Please enter a valid return reason');
       return;
     }
 
-    const vendorIds = Array.isArray(order.vendorItems)
-      ? [...new Set(order.vendorItems.map((group) => String(group?.vendorId || '')).filter(Boolean))]
-      : [];
-
-    if (vendorIds.length > 1) {
-      toast.error('Please contact support to request return for multi-vendor orders');
+    if (vendorOptions.length > 1 && !returnVendorId) {
+      toast.error('Please select a vendor for return request');
       return;
     }
 
     try {
+      setIsSubmittingReturn(true);
       await requestReturn(order.id, {
-        reason: reason.trim(),
-        ...(vendorIds.length === 1 ? { vendorId: vendorIds[0] } : {}),
+        reason,
+        ...(returnVendorId ? { vendorId: returnVendorId } : {}),
       });
       toast.success('Return request submitted successfully');
+      setShowReturnModal(false);
+      setReturnReason('Product issue');
     } catch (error) {
       toast.error(error?.response?.data?.message || error?.message || 'Failed to submit return request');
+    } finally {
+      setIsSubmittingReturn(false);
     }
   };
 
@@ -187,8 +211,8 @@ const MobileOrderDetail = () => {
                         </div>
                         {/* Vendor Items */}
                         <div className="space-y-2 pl-2">
-                          {vendorGroup.items.map((item) => (
-                            <div key={item.id} className="flex items-center gap-3">
+                          {vendorGroup.items.map((item, itemIndex) => (
+                            <div key={`${item.id}-${itemIndex}-${getVariantSignature(item?.variant || {})}`} className="flex items-center gap-3">
                               <div className="w-12 h-12 rounded-xl overflow-hidden bg-gray-100 flex-shrink-0">
                                 <LazyImage
                                   src={item.image}
@@ -199,8 +223,13 @@ const MobileOrderDetail = () => {
                               <div className="flex-1 min-w-0">
                                 <h3 className="font-semibold text-gray-800 text-sm mb-1">{item.name}</h3>
                                 <p className="text-xs text-gray-600">
-                                  {formatPrice(item.price)} × {item.quantity}
+                                  {formatPrice(item.price)} x {item.quantity}
                                 </p>
+                                {formatVariantLabel(item?.variant) && (
+                                  <p className="text-[11px] text-gray-500">
+                                    {formatVariantLabel(item?.variant)}
+                                  </p>
+                                )}
                               </div>
                               <p className="font-bold text-gray-800 text-sm">
                                 {formatPrice(item.price * item.quantity)}
@@ -213,8 +242,8 @@ const MobileOrderDetail = () => {
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {orderItems.map((item) => (
-                      <div key={item.id} className="flex items-center gap-3">
+                    {orderItems.map((item, itemIndex) => (
+                      <div key={`${item.id}-${itemIndex}-${getVariantSignature(item?.variant || {})}`} className="flex items-center gap-3">
                         <div className="w-16 h-16 rounded-xl overflow-hidden bg-gray-100 flex-shrink-0">
                           <LazyImage
                             src={item.image}
@@ -225,8 +254,13 @@ const MobileOrderDetail = () => {
                         <div className="flex-1 min-w-0">
                           <h3 className="font-semibold text-gray-800 text-sm mb-1">{item.name}</h3>
                           <p className="text-xs text-gray-600">
-                            {formatPrice(item.price)} × {item.quantity}
+                            {formatPrice(item.price)} x {item.quantity}
                           </p>
+                          {formatVariantLabel(item?.variant) && (
+                                  <p className="text-[11px] text-gray-500">
+                                    {formatVariantLabel(item?.variant)}
+                                  </p>
+                                )}
                         </div>
                         <p className="font-bold text-gray-800 text-sm">
                           {formatPrice(item.price * item.quantity)}
@@ -329,7 +363,7 @@ const MobileOrderDetail = () => {
                 </button>
                 {order.status === 'delivered' && (
                   <button
-                    onClick={handleRequestReturn}
+                    onClick={openReturnModal}
                     className="w-full py-3 bg-amber-50 text-amber-700 rounded-xl font-semibold flex items-center justify-center gap-2 hover:bg-amber-100 transition-colors"
                   >
                     <FiPackage className="text-lg" />
@@ -346,10 +380,82 @@ const MobileOrderDetail = () => {
               </div>
             </div>
           </div>
+
+          {showReturnModal && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/40 z-50 flex items-end sm:items-center sm:justify-center"
+              onClick={() => setShowReturnModal(false)}
+            >
+              <motion.div
+                initial={{ y: 20, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                exit={{ y: 20, opacity: 0 }}
+                onClick={(e) => e.stopPropagation()}
+                className="w-full sm:max-w-md bg-white rounded-t-2xl sm:rounded-2xl p-4 sm:p-5"
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-bold text-gray-800">Request Return</h3>
+                  <button
+                    onClick={() => setShowReturnModal(false)}
+                    className="p-2 rounded-full hover:bg-gray-100"
+                  >
+                    <FiX className="text-gray-600" />
+                  </button>
+                </div>
+
+                {vendorOptions.length > 1 && (
+                  <div className="mb-4">
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      Select Vendor
+                    </label>
+                    <select
+                      value={returnVendorId}
+                      onChange={(e) => setReturnVendorId(e.target.value)}
+                      className="w-full px-3 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    >
+                      <option value="">Choose vendor</option>
+                      {vendorOptions.map((vendor) => (
+                        <option key={vendor.id} value={vendor.id}>
+                          {vendor.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                <div className="mb-4">
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Reason
+                  </label>
+                  <textarea
+                    value={returnReason}
+                    onChange={(e) => setReturnReason(e.target.value)}
+                    rows={3}
+                    className="w-full px-3 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    placeholder="Describe the issue briefly"
+                  />
+                </div>
+
+                <button
+                  onClick={handleRequestReturn}
+                  disabled={isSubmittingReturn}
+                  className="w-full py-3 gradient-green text-white rounded-xl font-semibold disabled:opacity-70"
+                >
+                  {isSubmittingReturn ? 'Submitting...' : 'Submit Return Request'}
+                </button>
+              </motion.div>
+            </motion.div>
+          )}
       </MobileLayout>
     </PageTransition>
   );
 };
 
 export default MobileOrderDetail;
+
+
+
 

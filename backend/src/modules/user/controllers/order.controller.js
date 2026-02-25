@@ -14,6 +14,18 @@ import { createNotification } from '../../../services/notification.service.js';
 import { calculateVendorShippingForGroups } from '../../../services/vendorShipping.service.js';
 
 const normalizeVariantPart = (value) => String(value || '').trim().toLowerCase();
+const normalizeAxisName = (value) =>
+    String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, '_');
+const createDynamicVariantKey = (selection = {}) =>
+    Object.entries(selection || {})
+        .map(([axis, value]) => [normalizeAxisName(axis), normalizeVariantPart(value)])
+        .filter(([axis, value]) => axis && value)
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([axis, value]) => `${axis}=${value}`)
+        .join('|');
 
 const toVariantPriceEntries = (variantPrices) => {
     if (!variantPrices) return [];
@@ -22,16 +34,82 @@ const toVariantPriceEntries = (variantPrices) => {
     return [];
 };
 
-const resolveVariantPrice = (product, selectedVariant) => {
+const toVariantStockEntries = (stockMap) => {
+    if (!stockMap) return [];
+    if (stockMap instanceof Map) return Array.from(stockMap.entries());
+    if (typeof stockMap === 'object') return Object.entries(stockMap);
+    return [];
+};
+
+const resolveVariantSelection = (product, selectedVariant) => {
     const basePrice = Number(product?.price);
     if (!Number.isFinite(basePrice)) {
         throw new ApiError(400, `Invalid price configured for product ${product?.name || product?._id || ''}.`);
     }
 
+    const entries = toVariantPriceEntries(product?.variants?.prices);
+    const attributeAxes = Array.isArray(product?.variants?.attributes)
+        ? product.variants.attributes
+            .map((attr) => ({
+                axisKey: normalizeAxisName(attr?.name),
+                values: Array.isArray(attr?.values) ? attr.values : [],
+            }))
+            .filter((attr) => attr.axisKey && attr.values.length > 0)
+        : [];
+    const hasDynamicAxes = attributeAxes.length > 0;
+
+    if (hasDynamicAxes) {
+        const normalizedSelection = {};
+        Object.entries(selectedVariant || {}).forEach(([axis, value]) => {
+            const axisKey = normalizeAxisName(axis);
+            const selectedValue = String(value || '').trim();
+            if (axisKey && selectedValue) normalizedSelection[axisKey] = selectedValue;
+        });
+
+        const missingAxis = attributeAxes.find((attr) => !String(normalizedSelection[attr.axisKey] || '').trim());
+        if (missingAxis) {
+            throw new ApiError(400, `Please select ${missingAxis.axisKey.replace(/_/g, ' ')} for ${product?.name || 'product'}.`);
+        }
+
+        const selectionKey = createDynamicVariantKey(normalizedSelection);
+        if (!selectionKey) {
+            throw new ApiError(400, `Please select a variant for ${product?.name || 'product'}.`);
+        }
+        if (!entries.length) {
+            return { price: basePrice, variantKey: selectionKey, hasVariantAxes: true };
+        }
+
+        const exact = entries.find(([rawKey]) => String(rawKey).trim() === selectionKey);
+        if (exact) {
+            const price = Number(exact[1]);
+            if (Number.isFinite(price) && price >= 0) {
+                return { price, variantKey: String(exact[0]).trim(), hasVariantAxes: true };
+            }
+        }
+        const normalized = entries.find(
+            ([rawKey]) => normalizeVariantPart(rawKey) === normalizeVariantPart(selectionKey)
+        );
+        if (normalized) {
+            const price = Number(normalized[1]);
+            if (Number.isFinite(price) && price >= 0) {
+                return { price, variantKey: String(normalized[0]).trim(), hasVariantAxes: true };
+            }
+        }
+        throw new ApiError(400, `Selected variant is not available for ${product?.name || 'product'}.`);
+    }
+
+    const sizes = Array.isArray(product?.variants?.sizes) ? product.variants.sizes : [];
+    const colors = Array.isArray(product?.variants?.colors) ? product.variants.colors : [];
+    const hasVariantAxes = sizes.length > 0 || colors.length > 0;
+
     const size = normalizeVariantPart(selectedVariant?.size);
     const color = normalizeVariantPart(selectedVariant?.color);
-    const entries = toVariantPriceEntries(product?.variants?.prices);
-    if (!entries.length || (!size && !color)) return basePrice;
+    if (hasVariantAxes && !size && !color) {
+        throw new ApiError(400, `Please select a variant for ${product?.name || 'product'}.`);
+    }
+    if (!entries.length || (!size && !color)) {
+        return { price: basePrice, variantKey: null, hasVariantAxes };
+    }
 
     const candidateKeys = [
         `${size}|${color}`,
@@ -46,7 +124,9 @@ const resolveVariantPrice = (product, selectedVariant) => {
         const exact = entries.find(([rawKey]) => String(rawKey).trim() === candidate);
         if (exact) {
             const price = Number(exact[1]);
-            if (Number.isFinite(price) && price >= 0) return price;
+            if (Number.isFinite(price) && price >= 0) {
+                return { price, variantKey: String(exact[0]).trim(), hasVariantAxes };
+            }
         }
 
         const normalized = entries.find(
@@ -54,11 +134,63 @@ const resolveVariantPrice = (product, selectedVariant) => {
         );
         if (normalized) {
             const price = Number(normalized[1]);
-            if (Number.isFinite(price) && price >= 0) return price;
+            if (Number.isFinite(price) && price >= 0) {
+                return { price, variantKey: String(normalized[0]).trim(), hasVariantAxes };
+            }
         }
     }
 
-    return basePrice;
+    if (hasVariantAxes) {
+        throw new ApiError(400, `Selected variant is not available for ${product?.name || 'product'}.`);
+    }
+    return { price: basePrice, variantKey: null, hasVariantAxes };
+};
+
+const resolveOrderItemVariantKey = (product, orderItem) => {
+    const explicitKey = String(orderItem?.variantKey || '').trim();
+    if (explicitKey) return explicitKey;
+
+    const stockEntries = toVariantStockEntries(product?.variants?.stockMap).map(([k]) => String(k).trim());
+    const priceEntries = toVariantPriceEntries(product?.variants?.prices).map(([k]) => String(k).trim());
+    const existingKeys = [...new Set([...stockEntries, ...priceEntries])];
+    if (!existingKeys.length) return null;
+
+    const dynamicSelection = Object.entries(orderItem?.variant || {}).reduce((acc, [axis, value]) => {
+        const axisKey = normalizeAxisName(axis);
+        const selectedValue = String(value || '').trim();
+        if (axisKey && selectedValue) acc[axisKey] = selectedValue;
+        return acc;
+    }, {});
+    const dynamicKey = createDynamicVariantKey(dynamicSelection);
+    if (dynamicKey) {
+        const exactDynamic = existingKeys.find((key) => key === dynamicKey);
+        if (exactDynamic) return exactDynamic;
+        const normalizedDynamic = existingKeys.find(
+            (key) => normalizeVariantPart(key) === normalizeVariantPart(dynamicKey)
+        );
+        if (normalizedDynamic) return normalizedDynamic;
+    }
+
+    const size = normalizeVariantPart(orderItem?.variant?.size);
+    const color = normalizeVariantPart(orderItem?.variant?.color);
+    if (!size && !color) return null;
+
+    const candidates = [
+        `${size}|${color}`,
+        `${size}-${color}`,
+        `${size}_${color}`,
+        `${size}:${color}`,
+        size && !color ? size : null,
+        color && !size ? color : null,
+    ].filter(Boolean);
+
+    for (const candidate of candidates) {
+        const exact = existingKeys.find((key) => key === candidate);
+        if (exact) return exact;
+        const normalized = existingKeys.find((key) => normalizeVariantPart(key) === normalizeVariantPart(candidate));
+        if (normalized) return normalized;
+    }
+    return null;
 };
 
 // POST /api/user/orders
@@ -109,11 +241,28 @@ export const placeOrder = asyncHandler(async (req, res) => {
         if (product.stockQuantity < item.quantity) throw new ApiError(400, `Only ${product.stockQuantity} units of ${product.name} available.`);
 
         // Always trust server-side product pricing; never trust client-sent item.price.
-        const itemPrice = resolveVariantPrice(product, item.variant);
+        const { price: itemPrice, variantKey, hasVariantAxes } = resolveVariantSelection(product, item.variant);
+        const variantStockValue = variantKey ? Number(product?.variants?.stockMap?.get?.(variantKey) ?? product?.variants?.stockMap?.[variantKey]) : null;
+        if (hasVariantAxes && variantKey && Number.isFinite(variantStockValue) && variantStockValue < item.quantity) {
+            throw new ApiError(400, `Only ${variantStockValue} units available for selected variant of ${product.name}.`);
+        }
         const itemSubtotal = itemPrice * item.quantity;
         subtotal += itemSubtotal;
 
-        const enriched = { productId: product._id, vendorId: product.vendorId._id, name: product.name, image: product.image, price: itemPrice, quantity: item.quantity, variant: item.variant };
+        const variantImage =
+            variantKey
+                ? String((product?.variants?.imageMap?.get?.(variantKey) ?? product?.variants?.imageMap?.[variantKey]) || '').trim()
+                : '';
+        const enriched = {
+            productId: product._id,
+            vendorId: product.vendorId._id,
+            name: product.name,
+            image: variantImage || product.image,
+            price: itemPrice,
+            quantity: item.quantity,
+            variant: item.variant,
+            variantKey: variantKey || undefined,
+        };
         enrichedItems.push(enriched);
 
         // Group by vendor
@@ -227,13 +376,24 @@ export const placeOrder = asyncHandler(async (req, res) => {
 
             // 7. Deduct stock atomically to prevent oversell under concurrent checkout.
             for (const item of enrichedItems) {
+                const variantPath = item.variantKey ? `variants.stockMap.${item.variantKey}` : null;
+                const baseFilter = {
+                    _id: item.productId,
+                    stock: { $ne: 'out_of_stock' },
+                    stockQuantity: { $gte: Number(item.quantity || 0) },
+                };
+                if (variantPath) {
+                    baseFilter[variantPath] = { $gte: Number(item.quantity || 0) };
+                }
+
+                const updatePayload = { $inc: { stockQuantity: -Number(item.quantity || 0) } };
+                if (variantPath) {
+                    updatePayload.$inc[variantPath] = -Number(item.quantity || 0);
+                }
+
                 const updatedProduct = await Product.findOneAndUpdate(
-                    {
-                        _id: item.productId,
-                        stock: { $ne: 'out_of_stock' },
-                        stockQuantity: { $gte: Number(item.quantity || 0) },
-                    },
-                    { $inc: { stockQuantity: -Number(item.quantity || 0) } },
+                    baseFilter,
+                    updatePayload,
                     { new: true, session }
                 );
 
@@ -342,42 +502,74 @@ export const getOrderDetail = asyncHandler(async (req, res) => {
 
 // PATCH /api/user/orders/:id/cancel
 export const cancelOrder = asyncHandler(async (req, res) => {
-    const order = await Order.findOne({ orderId: req.params.id, userId: req.user.id });
-    if (!order) throw new ApiError(404, 'Order not found.');
-    if (!['pending', 'processing'].includes(order.status)) throw new ApiError(400, 'Order cannot be cancelled at this stage.');
+    const session = await mongoose.startSession();
+    try {
+        await session.withTransaction(async () => {
+            const order = await Order.findOne({ orderId: req.params.id, userId: req.user.id }).session(session);
+            if (!order) throw new ApiError(404, 'Order not found.');
+            if (!['pending', 'processing'].includes(order.status)) throw new ApiError(400, 'Order cannot be cancelled at this stage.');
 
-    order.status = 'cancelled';
-    order.cancelledAt = new Date();
-    order.cancellationReason = req.body.reason || 'Cancelled by customer';
-    await order.save();
+            order.status = 'cancelled';
+            order.cancelledAt = new Date();
+            order.cancellationReason = req.body.reason || 'Cancelled by customer';
+            if (Array.isArray(order.vendorItems)) {
+                order.vendorItems = order.vendorItems.map((vendorGroup) => ({
+                    ...vendorGroup.toObject(),
+                    status: 'cancelled',
+                }));
+            }
+            await order.save({ session });
 
-    // Restore stock and status
-    for (const item of order.items) {
-        const product = await Product.findById(item.productId);
-        if (!product) continue;
+            // Restore stock and status
+            for (const item of order.items) {
+                const quantity = Number(item.quantity || 0);
+                if (quantity <= 0) continue;
 
-        product.stockQuantity += Number(item.quantity || 0);
-        if (product.stockQuantity <= 0) product.stock = 'out_of_stock';
-        else if (product.stockQuantity <= product.lowStockThreshold) product.stock = 'low_stock';
-        else product.stock = 'in_stock';
-        await product.save();
+                const productSnapshot = await Product.findById(item.productId)
+                    .select('variants.stockMap variants.prices')
+                    .session(session)
+                    .lean();
+                const variantKey = resolveOrderItemVariantKey(productSnapshot, item);
+
+                const incUpdate = { stockQuantity: quantity };
+                if (variantKey) {
+                    incUpdate[`variants.stockMap.${variantKey}`] = quantity;
+                }
+
+                const product = await Product.findByIdAndUpdate(item.productId, { $inc: incUpdate }, { new: true, session });
+                if (!product) continue;
+
+                const nextStockState =
+                    product.stockQuantity <= 0
+                        ? 'out_of_stock'
+                        : (product.stockQuantity <= product.lowStockThreshold ? 'low_stock' : 'in_stock');
+
+                await Product.updateOne(
+                    { _id: product._id },
+                    { $set: { stock: nextStockState } },
+                    { session }
+                );
+            }
+
+            // Reverse vendor earnings visibility for this order.
+            await Commission.updateMany(
+                {
+                    orderId: order._id,
+                    status: { $ne: 'cancelled' },
+                },
+                {
+                    $set: {
+                        status: 'cancelled',
+                        paidAt: null,
+                        settlementId: null,
+                    },
+                },
+                { session }
+            );
+        });
+    } finally {
+        await session.endSession();
     }
-
-    // Reverse vendor earnings visibility for this order.
-    // Keep it idempotent by only updating commissions not already cancelled.
-    await Commission.updateMany(
-        {
-            orderId: order._id,
-            status: { $ne: 'cancelled' },
-        },
-        {
-            $set: {
-                status: 'cancelled',
-                paidAt: null,
-                settlementId: null,
-            },
-        }
-    );
 
     res.status(200).json(new ApiResponse(200, null, 'Order cancelled successfully.'));
 });

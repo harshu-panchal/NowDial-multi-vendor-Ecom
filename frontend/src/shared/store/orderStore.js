@@ -67,6 +67,7 @@ export const useOrderStore = create(
       isLoading: false,
       hasFetched: false,
       lastError: null,
+      orderPagination: { total: 0, page: 1, pages: 1, limit: 20 },
 
       // Create a new order
       createOrder: async (orderData) => {
@@ -129,15 +130,22 @@ export const useOrderStore = create(
           const list = Array.isArray(payload?.orders)
             ? payload.orders.map(normalizeOrder)
             : [];
+          const pagination = {
+            total: Number(payload?.total || 0),
+            page: Number(payload?.page || page),
+            pages: Number(payload?.pages || 1),
+            limit: Number(limit),
+          };
 
           set((state) => ({
             orders: page === 1 ? list : [...state.orders, ...list],
             hasFetched: true,
             isLoading: false,
             lastError: null,
+            orderPagination: pagination,
           }));
 
-          return list;
+          return { orders: list, pagination };
         } catch (error) {
           set({ isLoading: false, lastError: error?.message || 'Failed to fetch orders.' });
           throw error;
@@ -283,7 +291,12 @@ export const useOrderStore = create(
       },
 
       resetOrders: () => {
-        set({ orders: [], hasFetched: false, lastError: null });
+        set({
+          orders: [],
+          hasFetched: false,
+          lastError: null,
+          orderPagination: { total: 0, page: 1, pages: 1, limit: 20 },
+        });
       },
     }),
     {
