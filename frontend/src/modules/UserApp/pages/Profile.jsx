@@ -9,7 +9,6 @@ import { useAuthStore } from '../../../shared/store/authStore';
 import { isValidEmail, isValidPhone } from '../../../shared/utils/helpers';
 import toast from 'react-hot-toast';
 import PageTransition from '../../../shared/components/PageTransition';
-import ProtectedRoute from '../../../shared/components/Auth/ProtectedRoute';
 import PasswordStrengthMeter from '../components/Mobile/PasswordStrengthMeter';
 import { useUserNotificationStore } from '../store/userNotificationStore';
 
@@ -151,9 +150,8 @@ const MobileProfile = () => {
   ];
 
   return (
-    <ProtectedRoute>
-      <PageTransition>
-        <MobileLayout showBottomNav={true} showCartBar={true}>
+    <PageTransition>
+      <MobileLayout showBottomNav={true} showCartBar={true}>
           <div className="w-full pb-24 lg:pb-12 max-w-7xl mx-auto min-h-screen bg-gray-50">
             {/* Desktop Header */}
             <div className="hidden lg:block px-4 py-8">
@@ -607,9 +605,8 @@ const MobileProfile = () => {
               </div>
             </div>
           </div>
-        </MobileLayout>
-      </PageTransition>
-    </ProtectedRoute>
+      </MobileLayout>
+    </PageTransition>
   );
 };
 

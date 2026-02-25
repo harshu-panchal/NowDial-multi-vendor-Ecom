@@ -53,7 +53,11 @@ const buildIdempotencyKey = (payload, userId = null) => {
     hash = (hash << 5) - hash + base.charCodeAt(i);
     hash |= 0;
   }
-  return `ord-${Math.abs(hash)}-${payload?.items?.length || 0}`;
+  const attemptNonce =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
+  return `ord-${Math.abs(hash)}-${payload?.items?.length || 0}-${attemptNonce}`;
 };
 
 export const useOrderStore = create(
@@ -62,6 +66,7 @@ export const useOrderStore = create(
       orders: [],
       isLoading: false,
       hasFetched: false,
+      lastError: null,
 
       // Create a new order
       createOrder: async (orderData) => {
@@ -75,7 +80,7 @@ export const useOrderStore = create(
           throw new Error('Some cart items are outdated. Please refresh your cart and try again.');
         }
 
-        set({ isLoading: true });
+        set({ isLoading: true, lastError: null });
         try {
           const payload = {
             items: orderData.items.map((item) => ({
@@ -108,16 +113,16 @@ export const useOrderStore = create(
             throw new Error('Order created but could not be fetched. Please check your orders.');
           }
 
-          set({ isLoading: false });
+          set({ isLoading: false, lastError: null });
           return createdOrder;
         } catch (error) {
-          set({ isLoading: false });
+          set({ isLoading: false, lastError: error?.message || 'Failed to place order.' });
           throw error;
         }
       },
 
       fetchUserOrders: async (page = 1, limit = 20) => {
-        set({ isLoading: true });
+        set({ isLoading: true, lastError: null });
         try {
           const response = await api.get('/user/orders', { params: { page, limit } });
           const payload = response?.data ?? response;
@@ -129,11 +134,12 @@ export const useOrderStore = create(
             orders: page === 1 ? list : [...state.orders, ...list],
             hasFetched: true,
             isLoading: false,
+            lastError: null,
           }));
 
           return list;
         } catch (error) {
-          set({ isLoading: false });
+          set({ isLoading: false, lastError: error?.message || 'Failed to fetch orders.' });
           throw error;
         }
       },
@@ -149,10 +155,12 @@ export const useOrderStore = create(
 
           set((state) => ({
             orders: [normalized, ...state.orders.filter((o) => String(o.id) !== String(normalized.id))],
+            lastError: null,
           }));
 
           return normalized;
         } catch (error) {
+          set({ lastError: error?.message || 'Failed to fetch order.' });
           return null;
         }
       },
@@ -168,10 +176,12 @@ export const useOrderStore = create(
 
           set((state) => ({
             orders: [normalized, ...state.orders.filter((o) => String(o.id) !== String(normalized.id))],
+            lastError: null,
           }));
 
           return normalized;
         } catch (error) {
+          set({ lastError: error?.message || 'Failed to track order.' });
           return null;
         }
       },
@@ -273,7 +283,7 @@ export const useOrderStore = create(
       },
 
       resetOrders: () => {
-        set({ orders: [], hasFetched: false });
+        set({ orders: [], hasFetched: false, lastError: null });
       },
     }),
     {

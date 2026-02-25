@@ -353,7 +353,9 @@ const AppRoutes = () => {
         path="/order-confirmation/:orderId"
         element={
           <RouteWrapper>
-            <MobileOrderConfirmation />
+            <ProtectedRoute>
+              <MobileOrderConfirmation />
+            </ProtectedRoute>
           </RouteWrapper>
         }
       />

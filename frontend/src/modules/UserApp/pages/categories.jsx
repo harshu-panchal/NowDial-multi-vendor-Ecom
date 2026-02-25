@@ -9,6 +9,7 @@ import { useCategoryStore } from "../../../shared/store/categoryStore";
 import PageTransition from "../../../shared/components/PageTransition";
 import LazyImage from "../../../shared/components/LazyImage";
 import ProductCard from "../../../shared/components/ProductCard";
+import api from "../../../shared/utils/api";
 
 const normalizeId = (value) => String(value ?? "").trim();
 
@@ -19,6 +20,49 @@ const getParentId = (category) => {
     return normalizeId(parent?._id ?? parent?.id ?? "");
   }
   return normalizeId(parent);
+};
+
+const normalizeProduct = (raw) => {
+  const vendorObj =
+    raw?.vendor && typeof raw.vendor === "object"
+      ? raw.vendor
+      : raw?.vendorId && typeof raw.vendorId === "object"
+        ? raw.vendorId
+        : null;
+  const brandObj =
+    raw?.brand && typeof raw.brand === "object"
+      ? raw.brand
+      : raw?.brandId && typeof raw.brandId === "object"
+        ? raw.brandId
+        : null;
+  const categoryObj =
+    raw?.category && typeof raw.category === "object"
+      ? raw.category
+      : raw?.categoryId && typeof raw.categoryId === "object"
+        ? raw.categoryId
+        : null;
+
+  const id = normalizeId(raw?.id || raw?._id);
+
+  return {
+    ...raw,
+    id,
+    _id: id,
+    vendorId: normalizeId(vendorObj?._id || vendorObj?.id || raw?.vendorId),
+    vendorName: raw?.vendorName || vendorObj?.storeName || vendorObj?.name || "",
+    brandId: normalizeId(brandObj?._id || brandObj?.id || raw?.brandId),
+    brandName: raw?.brandName || brandObj?.name || "",
+    categoryId: normalizeId(categoryObj?._id || categoryObj?.id || raw?.categoryId),
+    categoryName: raw?.categoryName || categoryObj?.name || "",
+    image: raw?.image || raw?.images?.[0] || "",
+    images: Array.isArray(raw?.images)
+      ? raw.images
+      : raw?.image
+        ? [raw.image]
+        : [],
+    price: Number(raw?.price) || 0,
+    rating: Number(raw?.rating) || 0,
+  };
 };
 
 const MobileCategories = () => {
@@ -68,11 +112,11 @@ const MobileCategories = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState({
-    category: "",
     minPrice: "",
     maxPrice: "",
     minRating: "",
   });
+  const [categoryProductsFeed, setCategoryProductsFeed] = useState([]);
 
   // Get subcategories for selected category
   const subcategories = useMemo(() => {
@@ -104,47 +148,62 @@ const MobileCategories = () => {
     }
   }, [selectedCategoryId, subcategories]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchCategoryProducts = async () => {
+      const targetCategoryId = normalizeId(selectedSubcategory || selectedCategoryId);
+      if (!targetCategoryId) {
+        if (!cancelled) {
+          setCategoryProductsFeed([]);
+        }
+        return;
+      }
+
+      try {
+        const response = await api.get("/products", {
+          params: {
+            category: targetCategoryId,
+            page: 1,
+            limit: 200,
+            sort: "newest",
+          },
+        });
+        const payload = response?.data ?? response;
+        const products = Array.isArray(payload?.products) ? payload.products : [];
+        if (cancelled) return;
+
+        setCategoryProductsFeed(
+          products.map(normalizeProduct).filter((product) => product.id)
+        );
+      } catch {
+        if (cancelled) return;
+        const selectedId = normalizeId(selectedCategoryId);
+        const selectedSubId = normalizeId(selectedSubcategory);
+        const fallback = getCatalogProducts().filter((product) => {
+          const productCategoryId = normalizeId(product.categoryId);
+          const productCategory = categories.find(
+            (cat) => normalizeId(cat.id) === productCategoryId
+          );
+          const productParentId = getParentId(productCategory);
+
+          if (selectedSubId) return productCategoryId === selectedSubId;
+          return productCategoryId === selectedId || productParentId === selectedId;
+        });
+        setCategoryProductsFeed(fallback);
+      }
+    };
+
+    fetchCategoryProducts();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedCategoryId, selectedSubcategory, categories]);
+
   // Filter products based on selected category, subcategory, search query, and filters
   const filteredProducts = useMemo(() => {
     if (!selectedCategoryId) return [];
-
-    const selectedId = normalizeId(selectedCategoryId);
-    const selectedSubId = normalizeId(selectedSubcategory);
-    const selectedSubCategoryObj = subcategories.find(
-      (sub) => normalizeId(sub.id) === selectedSubId
-    );
-    const selectedSubCategoryName = selectedSubCategoryObj?.name?.toLowerCase();
-
-    let filtered = getCatalogProducts().filter((product) => {
-      const productCategoryId = normalizeId(product.categoryId);
-      const productCategory = categories.find(
-        (cat) => normalizeId(cat.id) === productCategoryId
-      );
-      const productParentId = getParentId(productCategory);
-
-      if (selectedSubId) {
-        if (productCategoryId === selectedSubId) return true;
-        if (selectedSubCategoryName) {
-          return product.name?.toLowerCase().includes(selectedSubCategoryName);
-        }
-        return false;
-      }
-
-      return productCategoryId === selectedId || productParentId === selectedId;
-    });
-
-    // Fallback for static demo catalog where category links may be keyword-only.
-    if (!filtered.length) {
-      const selectedCategory = rootCategories.find(
-        (cat) => normalizeId(cat.id) === selectedId
-      );
-      if (selectedCategory?.name) {
-        const keyword = selectedCategory.name.toLowerCase().split(" ")[0];
-        filtered = getCatalogProducts().filter((product) =>
-          product.name?.toLowerCase().includes(keyword)
-        );
-      }
-    }
+    let filtered = [...categoryProductsFeed];
 
     // Filter by search query
     if (searchQuery) {
@@ -175,8 +234,7 @@ const MobileCategories = () => {
     return filtered;
   }, [
     selectedCategoryId,
-    selectedSubcategory,
-    subcategories,
+    categoryProductsFeed,
     searchQuery,
     filters,
   ]);
@@ -228,7 +286,6 @@ const MobileCategories = () => {
 
   const clearFilters = () => {
     setFilters({
-      category: "",
       minPrice: "",
       maxPrice: "",
       minRating: "",

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import {
   FiMapPin,
   FiCreditCard,
@@ -39,7 +39,6 @@ const MobileCheckout = () => {
   );
 
   const [step, setStep] = useState(1);
-  const [isGuest, setIsGuest] = useState(false);
   const [selectedAddressId, setSelectedAddressId] = useState(null);
   const [showAddressForm, setShowAddressForm] = useState(false);
   const [couponCode, setCouponCode] = useState("");
@@ -49,6 +48,7 @@ const MobileCheckout = () => {
   const [shippingOption, setShippingOption] = useState("standard");
   const [estimatedShipping, setEstimatedShipping] = useState(null);
   const [isEstimatingShipping, setIsEstimatingShipping] = useState(false);
+  const [isPlacingOrder, setIsPlacingOrder] = useState(false);
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -62,13 +62,13 @@ const MobileCheckout = () => {
   });
 
   useEffect(() => {
-    if (isAuthenticated && !isGuest) {
+    if (isAuthenticated) {
       fetchAddresses().catch(() => null);
     }
-  }, [isAuthenticated, isGuest, fetchAddresses]);
+  }, [isAuthenticated, fetchAddresses]);
 
   useEffect(() => {
-    if (isAuthenticated && user && !isGuest) {
+    if (isAuthenticated && user) {
       setFormData((prev) => ({
         ...prev,
         name: user.name || "",
@@ -92,7 +92,7 @@ const MobileCheckout = () => {
         }));
       }
     }
-  }, [isAuthenticated, user, isGuest, getDefaultAddress, addresses]);
+  }, [isAuthenticated, user, getDefaultAddress, addresses]);
 
   const calculateShippingFallback = () => {
     const total = getTotal();
@@ -286,10 +286,14 @@ const MobileCheckout = () => {
       toast.error("Please wait for coupon validation to complete.");
       return;
     }
+    if (step === 2 && isPlacingOrder) {
+      return;
+    }
 
     if (step === 1) {
       setStep(2);
     } else if (step === 2) {
+      setIsPlacingOrder(true);
       try {
         const order = await createOrder({
           userId: isAuthenticated ? user?.id : null,
@@ -310,6 +314,8 @@ const MobileCheckout = () => {
         navigate(`/order-confirmation/${order.id}`);
       } catch (error) {
         toast.error(error?.message || "Failed to place order");
+      } finally {
+        setIsPlacingOrder(false);
       }
     }
   };
@@ -334,32 +340,6 @@ const MobileCheckout = () => {
               <MobileCheckoutSteps currentStep={step} totalSteps={2} />
             </div>
           </div>
-
-          {/* Guest Checkout Option */}
-          {!isAuthenticated && !isGuest && (
-            <div className="px-4 py-4 bg-white border-b border-gray-200">
-              <div className="glass-card rounded-xl p-4">
-                <h3 className="text-base font-bold text-gray-800 mb-2">
-                  Have an account?
-                </h3>
-                <p className="text-sm text-gray-600 mb-4">
-                  Sign in for faster checkout
-                </p>
-                <div className="flex gap-3">
-                  <Link
-                    to="/login"
-                    className="flex-1 py-2.5 gradient-green text-white rounded-xl font-semibold text-center hover:shadow-glow-green transition-all">
-                    Sign In
-                  </Link>
-                  <button
-                    onClick={() => setIsGuest(true)}
-                    className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-xl font-semibold hover:bg-gray-200 transition-colors">
-                    Continue as Guest
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
 
           <form onSubmit={handleSubmit} className="lg:px-4 lg:py-6">
             <div className="lg:grid lg:grid-cols-12 lg:gap-8">
@@ -724,8 +704,9 @@ const MobileCheckout = () => {
                     <div className="p-4 border-t border-gray-100 bg-gray-50">
                       <button
                         type="submit"
+                        disabled={step === 2 && isPlacingOrder}
                         className="w-full gradient-green text-white py-3.5 rounded-xl font-bold text-lg shadow-lg hover:shadow-glow-green transition-all duration-300 transform hover:-translate-y-0.5">
-                        {step === 2 ? "Place Order" : "Continue to Payment"}
+                        {step === 2 ? (isPlacingOrder ? "Placing Order..." : "Place Order") : "Continue to Payment"}
                       </button>
                       {step === 2 && (
                         <button
@@ -760,8 +741,9 @@ const MobileCheckout = () => {
                 )}
                 <button
                   type="submit"
+                  disabled={step === 2 && isPlacingOrder}
                   className="flex-1 gradient-green text-white py-3 rounded-xl font-semibold hover:shadow-glow-green transition-all duration-300">
-                  {step === 2 ? "Place Order" : "Continue"}
+                  {step === 2 ? (isPlacingOrder ? "Placing..." : "Place Order") : "Continue"}
                 </button>
               </div>
             </div>

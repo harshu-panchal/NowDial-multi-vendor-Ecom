@@ -11,7 +11,7 @@ import LazyImage from '../../../shared/components/LazyImage';
 const MobileOrderConfirmation = () => {
   const { orderId } = useParams();
   const navigate = useNavigate();
-  const { getOrder, fetchOrderById } = useOrderStore();
+  const { getOrder, fetchOrderById, lastError } = useOrderStore();
   const [isResolving, setIsResolving] = useState(true);
   const order = getOrder(orderId);
   const orderItems = Array.isArray(order?.items) ? order.items : [];
@@ -55,6 +55,9 @@ const MobileOrderConfirmation = () => {
           <div className="flex items-center justify-center min-h-[60vh] px-4">
             <div className="text-center">
               <h2 className="text-xl font-bold text-gray-800 mb-4">Order Not Found</h2>
+              {lastError ? (
+                <p className="text-sm text-gray-500 mb-4">{lastError}</p>
+              ) : null}
               <button
                 onClick={() => navigate('/home')}
                 className="gradient-green text-white px-6 py-3 rounded-xl font-semibold"

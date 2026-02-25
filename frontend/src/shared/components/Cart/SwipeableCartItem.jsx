@@ -5,7 +5,6 @@ import { toast } from "react-hot-toast";
 import { useCartStore } from "../../store/useStore";
 import { useWishlistStore } from "../../store/wishlistStore";
 import { formatPrice } from "../../utils/helpers";
-import { getProductById } from "../../../data/products";
 import useSwipeGesture from "../../../modules/UserApp/hooks/useSwipeGesture";
 
 const SwipeableCartItem = ({ item, index }) => {
@@ -22,32 +21,26 @@ const SwipeableCartItem = ({ item, index }) => {
         setHasAnimated(true);
     }, []);
 
-    const getProductStock = (id) => {
-        const product = getProductById(id);
-        return product ? product.stockQuantity : null;
+    const getProductStock = () => Number(item?.stockQuantity);
+
+    const isMaxQuantity = (quantity) => {
+        const availableStock = Number(item?.stockQuantity);
+        return Number.isFinite(availableStock) ? quantity >= availableStock : false;
     };
 
-    const isMaxQuantity = (id, quantity) => {
-        const product = getProductById(id);
-        return product ? quantity >= product.stockQuantity : false;
-    };
-
-    const isLowStock = (id) => {
-        const product = getProductById(id);
-        return product ? product.stock === "low_stock" : false;
-    };
+    const isLowStock = () => String(item?.stock || "") === "low_stock";
 
     const handleQuantityChange = (id, currentQuantity, change, variant) => {
-        const product = getProductById(id);
         const newQuantity = currentQuantity + change;
+        const availableStock = Number(item?.stockQuantity);
 
         if (newQuantity <= 0) {
             removeItem(id, variant);
             return;
         }
 
-        if (product && newQuantity > product.stockQuantity) {
-            toast.error(`Only ${product.stockQuantity} items available in stock`);
+        if (Number.isFinite(availableStock) && newQuantity > availableStock) {
+            toast.error(`Only ${availableStock} items available in stock`);
             return;
         }
 
@@ -144,10 +137,10 @@ const SwipeableCartItem = ({ item, index }) => {
                     </p>
 
                     {/* Stock Warning */}
-                    {isLowStock(item.id) && (
+                    {isLowStock() && (
                         <div className="flex items-center gap-1 text-xs text-orange-600 mb-2">
                             <FiAlertCircle className="text-xs" />
-                            <span>Only {getProductStock(item.id)} left!</span>
+                            <span>Only {getProductStock()} left!</span>
                         </div>
                     )}
 
@@ -179,8 +172,8 @@ const SwipeableCartItem = ({ item, index }) => {
                                 e.stopPropagation();
                                 handleQuantityChange(item.id, item.quantity, 1, item.variant);
                             }}
-                            disabled={isMaxQuantity(item.id, item.quantity)}
-                            className={`w-8 h-8 flex items-center justify-center rounded-lg border transition-colors ${isMaxQuantity(item.id, item.quantity)
+                            disabled={isMaxQuantity(item.quantity)}
+                            className={`w-8 h-8 flex items-center justify-center rounded-lg border transition-colors ${isMaxQuantity(item.quantity)
                                 ? "bg-gray-100 border-gray-200 cursor-not-allowed opacity-50"
                                 : "bg-white border-gray-300 hover:bg-gray-50"
                                 }`}>

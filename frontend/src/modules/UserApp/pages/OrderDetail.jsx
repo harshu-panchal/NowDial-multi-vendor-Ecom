@@ -8,7 +8,6 @@ import { useCartStore } from '../../../shared/store/useStore';
 import { formatPrice } from '../../../shared/utils/helpers';
 import toast from 'react-hot-toast';
 import PageTransition from '../../../shared/components/PageTransition';
-import ProtectedRoute from '../../../shared/components/Auth/ProtectedRoute';
 import Badge from '../../../shared/components/Badge';
 import LazyImage from '../../../shared/components/LazyImage';
 
@@ -146,9 +145,8 @@ const MobileOrderDetail = () => {
   };
 
   return (
-    <ProtectedRoute>
-      <PageTransition>
-        <MobileLayout showBottomNav={false} showCartBar={true}>
+    <PageTransition>
+      <MobileLayout showBottomNav={false} showCartBar={true}>
           <div className="w-full pb-24">
             {/* Header */}
             <div className="px-4 py-4 bg-white border-b border-gray-200 sticky top-1 z-30">
@@ -348,9 +346,8 @@ const MobileOrderDetail = () => {
               </div>
             </div>
           </div>
-        </MobileLayout>
-      </PageTransition>
-    </ProtectedRoute>
+      </MobileLayout>
+    </PageTransition>
   );
 };
 

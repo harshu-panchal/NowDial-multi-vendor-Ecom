@@ -5,7 +5,7 @@ import * as wishlistController from '../controllers/wishlist.controller.js';
 import * as reviewController from '../controllers/review.controller.js';
 import * as orderController from '../controllers/order.controller.js';
 import * as notificationController from '../controllers/notification.controller.js';
-import { authenticate, optionalAuth } from '../../../middlewares/authenticate.js';
+import { authenticate } from '../../../middlewares/authenticate.js';
 import { authorize, enforceAccountStatus } from '../../../middlewares/authorize.js';
 import { authLimiter, otpLimiter } from '../../../middlewares/rateLimiter.js';
 import { validate } from '../../../middlewares/validate.js';
@@ -64,8 +64,8 @@ router.get('/reviews/product/:productId', reviewController.getProductReviews);
 router.post('/reviews', ...customerAuth, reviewController.addReview);
 router.post('/reviews/:id/helpful', reviewController.voteHelpful);
 
-// Order routes (optionalAuth for guest checkout)
-router.post('/orders', optionalAuth, validate(placeOrderSchema), orderController.placeOrder);
+// Order routes
+router.post('/orders', ...customerAuth, validate(placeOrderSchema), orderController.placeOrder);
 router.get('/orders', ...customerAuth, orderController.getUserOrders);
 router.get('/orders/:id', ...customerAuth, orderController.getOrderDetail);
 router.patch('/orders/:id/cancel', ...customerAuth, orderController.cancelOrder);

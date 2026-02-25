@@ -35,8 +35,8 @@ const MobileRegister = () => {
     try {
       // Combine first name and last name
       const fullName = `${data.firstName} ${data.lastName}`;
-      // Combine country code with phone number
-      const phone = data.countryCode ? `${data.countryCode}${data.phone}` : data.phone;
+      // Backend stores a normalized 10-digit phone value.
+      const phone = data.phone;
 
       await registerUser(fullName, data.email, data.password, phone);
       toast.success('Registration successful!');

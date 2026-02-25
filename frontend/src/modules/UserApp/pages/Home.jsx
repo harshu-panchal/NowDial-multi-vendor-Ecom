@@ -10,6 +10,7 @@ import DailyDealsSection from "../components/Mobile/DailyDealsSection";
 import RecommendedSection from "../components/Mobile/RecommendedSection";
 import FeaturedVendorsSection from "../components/Mobile/FeaturedVendorsSection";
 import BrandLogosScroll from "../components/Mobile/BrandLogosScroll";
+import MobileCategoryGrid from "../components/Mobile/MobileCategoryGrid";
 import LazyImage from "../../../shared/components/LazyImage";
 import {
   getMostPopular,
@@ -196,9 +197,9 @@ const MobileHome = () => {
   const [homeVendors, setHomeVendors] = useState([]);
   const [homeBrands, setHomeBrands] = useState([]);
 
-  const mostPopular = getMostPopular();
-  const trending = getTrending();
-  const flashSale = getFlashSale();
+  const fallbackMostPopular = getMostPopular();
+  const fallbackTrending = getTrending();
+  const fallbackFlashSale = getFlashSale();
   const fallbackNewArrivals = getAllNewArrivals().slice(0, 6);
   const fallbackDailyDeals = getDailyDeals().slice(0, 5);
   const fallbackRecommended = getRecommendedProducts(6);
@@ -221,6 +222,33 @@ const MobileHome = () => {
       .sort((a, b) => toNumber(b.rating, 0) - toNumber(a.rating, 0))
       .slice(0, 6);
   }, [catalogProducts, fallbackRecommended]);
+
+  const computedMostPopular = useMemo(() => {
+    if (catalogProducts.length === 0) return fallbackMostPopular.slice(0, 6);
+    return [...catalogProducts]
+      .sort((a, b) => {
+        const reviewsDiff = toNumber(b.reviewCount, 0) - toNumber(a.reviewCount, 0);
+        if (reviewsDiff !== 0) return reviewsDiff;
+        return toNumber(b.rating, 0) - toNumber(a.rating, 0);
+      })
+      .slice(0, 6);
+  }, [catalogProducts, fallbackMostPopular]);
+
+  const computedTrending = useMemo(() => {
+    if (catalogProducts.length === 0) return fallbackTrending.slice(0, 6);
+    return [...catalogProducts]
+      .sort((a, b) => {
+        const ratingDiff = toNumber(b.rating, 0) - toNumber(a.rating, 0);
+        if (ratingDiff !== 0) return ratingDiff;
+        return toNumber(b.reviewCount, 0) - toNumber(a.reviewCount, 0);
+      })
+      .slice(0, 6);
+  }, [catalogProducts, fallbackTrending]);
+
+  const computedFlashSale = useMemo(() => {
+    if (catalogProducts.length === 0) return fallbackFlashSale.slice(0, 6);
+    return catalogProducts.filter((product) => product.flashSale).slice(0, 6);
+  }, [catalogProducts, fallbackFlashSale]);
 
   const computedVendors = useMemo(() => {
     if (homeVendors.length === 0) return fallbackVendors;
@@ -574,6 +602,9 @@ const MobileHome = () => {
           {/* Brand Logos Scroll */}
           <BrandLogosScroll brands={computedBrands} />
 
+          {/* Categories */}
+          <MobileCategoryGrid />
+
           {/* Featured Vendors Section */}
           <FeaturedVendorsSection vendors={computedVendors} />
 
@@ -596,7 +627,7 @@ const MobileHome = () => {
               </Link>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-4">
-              {mostPopular.slice(0, 6).map((product, index) => (
+              {computedMostPopular.map((product, index) => (
                 <motion.div
                   key={product.id}
                   className={index === 5 ? "xl:hidden" : ""}
@@ -615,7 +646,7 @@ const MobileHome = () => {
 
 
           {/* Flash Sale */}
-          {flashSale.length > 0 && (
+          {computedFlashSale.length > 0 && (
             <div className="px-4 py-4 bg-gradient-to-br from-red-50 to-orange-50">
               <div className="flex items-center justify-between mb-4">
                 <div>
@@ -631,7 +662,7 @@ const MobileHome = () => {
                 </Link>
               </div>
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 md:gap-6">
-                {flashSale.slice(0, 6).map((product, index) => (
+                {computedFlashSale.map((product, index) => (
                   <motion.div
                     key={product.id}
                     className={index === 5 ? "xl:hidden" : ""}
@@ -656,7 +687,7 @@ const MobileHome = () => {
               </Link>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-4">
-              {trending.slice(0, 6).map((product, index) => (
+              {computedTrending.map((product, index) => (
                 <motion.div
                   key={product.id}
                   className={index === 5 ? "hidden xl:block 2xl:hidden" : ""}

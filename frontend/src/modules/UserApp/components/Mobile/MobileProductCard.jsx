@@ -26,8 +26,12 @@ const MobileProductCard = ({ product }) => {
     removeItem: removeFromWishlist,
     isInWishlist,
   } = useWishlistStore();
+  const hasNoVariant = (cartItem) =>
+    !cartItem?.variant?.size && !cartItem?.variant?.color;
   const isFavorite = isInWishlist(product.id);
-  const isInCart = items.some((item) => item.id === product.id);
+  const isInCart = items.some(
+    (item) => item.id === product.id && hasNoVariant(item)
+  );
   const [showLongPressMenu, setShowLongPressMenu] = useState(false);
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
   const [showFlyingItem, setShowFlyingItem] = useState(false);
@@ -85,6 +89,9 @@ const MobileProductCard = ({ product }) => {
       price: product.price,
       image: product.image,
       quantity: 1,
+      stockQuantity: product.stockQuantity,
+      vendorId: product.vendorId,
+      vendorName: product.vendorName,
     });
     if (!addedToCart) return;
     triggerCartAnimation();
@@ -95,7 +102,7 @@ const MobileProductCard = ({ product }) => {
       e.preventDefault();
       e.stopPropagation();
     }
-    removeItem(product.id);
+    removeItem(product.id, {});
     toast.success("Removed from cart!");
   };
 

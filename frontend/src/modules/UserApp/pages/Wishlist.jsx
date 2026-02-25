@@ -10,7 +10,6 @@ import { useCartStore } from "../../../shared/store/useStore";
 import { useAuthStore } from "../../../shared/store/authStore";
 import toast from "react-hot-toast";
 import PageTransition from '../../../shared/components/PageTransition';
-import ProtectedRoute from "../../../shared/components/Auth/ProtectedRoute";
 
 const MobileWishlist = () => {
   const navigate = useNavigate();
@@ -49,10 +48,9 @@ const MobileWishlist = () => {
   };
 
   return (
-    <ProtectedRoute>
-      <PageTransition>
-        <MobileLayout showBottomNav={true} showCartBar={true}>
-          <div className="w-full pb-24">
+    <PageTransition>
+      <MobileLayout showBottomNav={true} showCartBar={true}>
+        <div className="w-full pb-24">
             {/* Header */}
             <div className="px-4 py-4 bg-white border-b border-gray-200 sticky top-1 z-40 shadow-sm">
               <div className="flex items-center gap-3">
@@ -117,10 +115,9 @@ const MobileWishlist = () => {
                 />
               )}
             </div>
-          </div>
-        </MobileLayout>
-      </PageTransition>
-    </ProtectedRoute>
+        </div>
+      </MobileLayout>
+    </PageTransition>
   );
 };
 
@@ -133,7 +130,7 @@ const EmptyWishlistState = () => (
     </h3>
     <p className="text-gray-600 mb-6">Start adding items you love!</p>
     <Link
-      to="/"
+      to="/home"
       className="gradient-green text-white px-6 py-3 rounded-xl font-semibold inline-block">
       Continue Shopping
     </Link>

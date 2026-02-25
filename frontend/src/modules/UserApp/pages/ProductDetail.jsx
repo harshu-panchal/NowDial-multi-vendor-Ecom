@@ -23,6 +23,7 @@ import {
   getVendorById,
   getBrandById,
 } from "../data/catalogData";
+import api from "../../../shared/utils/api";
 import { formatPrice } from "../../../shared/utils/helpers";
 import toast from "react-hot-toast";
 import MobileLayout from "../components/Layout/MobileLayout";
@@ -74,12 +75,83 @@ const resolveVariantPrice = (product, selectedVariant) => {
 
 const isMongoId = (value) => /^[a-fA-F0-9]{24}$/.test(String(value || ""));
 
+const normalizeProduct = (raw) => {
+  if (!raw) return null;
+
+  const vendorObj =
+    raw?.vendor && typeof raw.vendor === "object"
+      ? raw.vendor
+      : raw?.vendorId && typeof raw.vendorId === "object"
+        ? raw.vendorId
+        : null;
+  const brandObj =
+    raw?.brand && typeof raw.brand === "object"
+      ? raw.brand
+      : raw?.brandId && typeof raw.brandId === "object"
+        ? raw.brandId
+        : null;
+  const categoryObj =
+    raw?.category && typeof raw.category === "object"
+      ? raw.category
+      : raw?.categoryId && typeof raw.categoryId === "object"
+        ? raw.categoryId
+        : null;
+
+  const id = String(raw?.id || raw?._id || "").trim();
+  if (!id) return null;
+
+  const vendorId = String(vendorObj?._id || vendorObj?.id || raw?.vendorId || "").trim();
+  const brandId = String(brandObj?._id || brandObj?.id || raw?.brandId || "").trim();
+  const categoryId = String(categoryObj?._id || categoryObj?.id || raw?.categoryId || "").trim();
+  const image = raw?.image || raw?.images?.[0] || "";
+  const images = Array.isArray(raw?.images) ? raw.images.filter(Boolean) : image ? [image] : [];
+
+  return {
+    ...raw,
+    id,
+    _id: id,
+    vendorId,
+    brandId,
+    categoryId,
+    image,
+    images,
+    price: Number(raw?.price) || 0,
+    originalPrice:
+      raw?.originalPrice !== undefined && raw?.originalPrice !== null
+        ? Number(raw.originalPrice)
+        : undefined,
+    rating: Number(raw?.rating) || 0,
+    reviewCount: Number(raw?.reviewCount) || 0,
+    stockQuantity: Number(raw?.stockQuantity) || 0,
+    vendorName: raw?.vendorName || vendorObj?.storeName || vendorObj?.name || "",
+    brandName: raw?.brandName || brandObj?.name || "",
+    categoryName: raw?.categoryName || categoryObj?.name || "",
+    vendor: vendorObj
+      ? {
+        ...vendorObj,
+        id: String(vendorObj?.id || vendorObj?._id || vendorId),
+      }
+      : null,
+    brand: brandObj
+      ? {
+        ...brandObj,
+        id: String(brandObj?.id || brandObj?._id || brandId),
+      }
+      : null,
+    stock:
+      raw?.stock ||
+      (Number(raw?.stockQuantity) > 0 ? "in_stock" : "out_of_stock"),
+    description: String(raw?.description || "").trim(),
+  };
+};
+
 const MobileProductDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const product = getProductById(id);
-  const vendor = product ? getVendorById(product.vendorId) : null;
-  const brand = product ? getBrandById(product.brandId) : null;
+  const localFallbackProduct = useMemo(() => normalizeProduct(getProductById(id)), [id]);
+  const [product, setProduct] = useState(localFallbackProduct);
+  const [similarProducts, setSimilarProducts] = useState([]);
+  const [isLoadingProduct, setIsLoadingProduct] = useState(true);
   const [quantity, setQuantity] = useState(1);
   const [selectedVariant, setSelectedVariant] = useState(null);
 
@@ -95,10 +167,77 @@ const MobileProductDetail = () => {
   const { fetchReviews, sortReviews, addReview } = useReviewsStore();
   const { getAllOrders } = useOrderStore();
   const { user, isAuthenticated } = useAuthStore();
+  const vendor = useMemo(() => {
+    if (!product) return null;
+    if (product.vendor?.id) return product.vendor;
+    return getVendorById(product.vendorId);
+  }, [product]);
+  const brand = useMemo(() => {
+    if (!product) return null;
+    if (product.brand?.id) return product.brand;
+    return getBrandById(product.brandId);
+  }, [product]);
 
   const isFavorite = product ? isInWishlist(product.id) : false;
   const isInCart = product ? items.some((item) => item.id === product.id) : false;
   const productReviews = product ? sortReviews(product.id, "newest") : [];
+
+  useEffect(() => {
+    let active = true;
+    setIsLoadingProduct(true);
+
+    const loadProductDetail = async () => {
+      try {
+        const [detailRes, similarRes] = await Promise.allSettled([
+          api.get(`/products/${id}`),
+          api.get(`/similar/${id}`),
+        ]);
+
+        const detailPayload =
+          detailRes.status === "fulfilled"
+            ? detailRes.value?.data ?? detailRes.value
+            : null;
+        const resolvedProduct = normalizeProduct(detailPayload) || localFallbackProduct;
+
+        const similarPayload =
+          similarRes.status === "fulfilled"
+            ? similarRes.value?.data ?? similarRes.value
+            : null;
+        const resolvedSimilar = Array.isArray(similarPayload)
+          ? similarPayload
+            .map(normalizeProduct)
+            .filter(
+              (item) => item?.id && String(item.id) !== String(resolvedProduct?.id || "")
+            )
+            .slice(0, 5)
+          : [];
+
+        if (!active) return;
+
+        setProduct(resolvedProduct);
+        if (resolvedSimilar.length > 0) {
+          setSimilarProducts(resolvedSimilar);
+        } else if (resolvedProduct?.id) {
+          setSimilarProducts(getSimilarProducts(resolvedProduct.id, 5));
+        } else {
+          setSimilarProducts([]);
+        }
+      } catch {
+        if (!active) return;
+        setProduct(localFallbackProduct);
+        setSimilarProducts(
+          localFallbackProduct?.id ? getSimilarProducts(localFallbackProduct.id, 5) : []
+        );
+      } finally {
+        if (active) setIsLoadingProduct(false);
+      }
+    };
+
+    loadProductDetail();
+    return () => {
+      active = false;
+    };
+  }, [id, localFallbackProduct]);
 
   useEffect(() => {
     if (product?.variants?.defaultVariant) {
@@ -118,14 +257,20 @@ const MobileProductDetail = () => {
         <MobileLayout showBottomNav={false} showCartBar={false}>
           <div className="flex items-center justify-center min-h-[60vh] px-4">
             <div className="text-center">
-              <h2 className="text-xl font-bold text-gray-800 mb-4">
-                Product Not Found
-              </h2>
-              <button
-                onClick={() => navigate("/home")}
-                className="gradient-green text-white px-6 py-3 rounded-xl font-semibold">
-                Go Back Home
-              </button>
+              {isLoadingProduct ? (
+                <h2 className="text-xl font-bold text-gray-800 mb-4">Loading product...</h2>
+              ) : (
+                <>
+                  <h2 className="text-xl font-bold text-gray-800 mb-4">
+                    Product Not Found
+                  </h2>
+                  <button
+                    onClick={() => navigate("/home")}
+                    className="gradient-green text-white px-6 py-3 rounded-xl font-semibold">
+                    Go Back Home
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </MobileLayout>
@@ -134,6 +279,7 @@ const MobileProductDetail = () => {
   }
 
   const handleAddToCart = () => {
+    if (!product) return;
     if (product.stock === "out_of_stock") {
       toast.error("Product is out of stock");
       return;
@@ -148,6 +294,9 @@ const MobileProductDetail = () => {
       image: product.image,
       quantity: quantity,
       variant: selectedVariant,
+      stockQuantity: product.stockQuantity,
+      vendorId: product.vendorId,
+      vendorName: vendor?.storeName || vendor?.name || product.vendorName,
     });
     if (!addedToCart) return;
     triggerCartAnimation();
@@ -155,11 +304,13 @@ const MobileProductDetail = () => {
   };
 
   const handleRemoveFromCart = () => {
+    if (!product) return;
     removeItem(product.id);
     toast.success("Removed from cart!");
   };
 
   const handleFavorite = () => {
+    if (!product) return;
     if (isFavorite) {
       removeFromWishlist(product.id);
       toast.success("Removed from wishlist");
@@ -184,26 +335,19 @@ const MobileProductDetail = () => {
   };
 
   const productImages = useMemo(() => {
-    let images = product.images && product.images.length > 0
-      ? [...product.images] // Create a mutable copy
-      : [product.image];
-
-    // Ensure exactly 3 images for the gallery as requested (representing color variants)
-    while (images.length < 3) {
-      images.push(product.image);
-    }
-
-    // Limit to exactly 3 images
-    return images.slice(0, 3);
+    if (!product) return [];
+    const images =
+      Array.isArray(product.images) && product.images.length > 0
+        ? product.images.filter(Boolean)
+        : product.image
+          ? [product.image]
+          : [];
+    return images;
   }, [product]);
 
   const currentPrice = useMemo(() => {
     return resolveVariantPrice(product, selectedVariant);
   }, [product, selectedVariant]);
-
-  const similarProducts = useMemo(() => {
-    return getSimilarProducts(product.id, 5);
-  }, [product?.id]);
 
   const productFaqs = useMemo(() => {
     if (!Array.isArray(product?.faqs)) return [];
@@ -486,12 +630,15 @@ const MobileProductDetail = () => {
                     Product Description
                   </h3>
                   <div className="prose prose-sm lg:prose-base text-gray-600 leading-relaxed bg-gray-50 p-6 rounded-2xl border border-gray-100">
-                    <p>
-                      High-quality {product.name.toLowerCase()} available in{" "}
-                      {product.unit.toLowerCase()}. This product is carefully selected
-                      to ensure the best quality and freshness. Perfect for your daily
-                      needs with excellent value for money.
-                    </p>
+                    {product.description ? (
+                      <p>{product.description}</p>
+                    ) : (
+                      <p>
+                        High-quality {product.name.toLowerCase()} available in{" "}
+                        {product.unit.toLowerCase()}. This product is carefully selected
+                        to ensure the best quality and freshness.
+                      </p>
+                    )}
                   </div>
                 </div>
 

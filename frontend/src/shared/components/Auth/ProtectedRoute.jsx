@@ -19,8 +19,18 @@ const ProtectedRoute = ({ children }) => {
   const accessToken = token || localStorage.getItem('token');
   const tokenPayload = decodeJwtPayload(accessToken);
   const resolvedRole = String(user?.role || tokenPayload?.role || '').toLowerCase();
+  const tokenExpiryMs =
+    typeof tokenPayload?.exp === 'number' ? tokenPayload.exp * 1000 : null;
+  const isExpired = tokenExpiryMs ? Date.now() >= tokenExpiryMs : false;
 
   if (!isAuthenticated || !accessToken) {
+    return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  if (isExpired) {
+    localStorage.removeItem('token');
+    localStorage.removeItem('refresh-token');
+    localStorage.removeItem('auth-storage');
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 

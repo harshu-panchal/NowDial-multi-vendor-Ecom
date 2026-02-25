@@ -194,6 +194,8 @@ export const useAuthStore = create(
         });
         localStorage.removeItem('token');
         localStorage.removeItem('refresh-token');
+        localStorage.removeItem('cart-storage');
+        localStorage.removeItem('wishlist-storage');
       },
 
       // Update user profile

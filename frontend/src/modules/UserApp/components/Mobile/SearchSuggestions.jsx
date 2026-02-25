@@ -1,7 +1,8 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FiSearch, FiX, FiClock } from 'react-icons/fi';
 import { getCatalogProducts } from '../../data/catalogData';
+import api from '../../../../shared/utils/api';
 
 const SearchSuggestions = ({
   query,
@@ -13,6 +14,7 @@ const SearchSuggestions = ({
   onClearRecent,
 }) => {
   const panelRef = useRef(null);
+  const [suggestions, setSuggestions] = useState([]);
   const trimmedQuery = String(query || '').trim();
 
   useEffect(() => {
@@ -32,12 +34,46 @@ const SearchSuggestions = ({
 
   if (!isOpen) return null;
 
-  // Filter products based on query
-  const suggestions = getCatalogProducts()
-    .filter((product) =>
-      product.name.toLowerCase().includes(trimmedQuery.toLowerCase())
-    )
-    .slice(0, 5);
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchSuggestions = async () => {
+      if (!isOpen || !trimmedQuery) {
+        setSuggestions([]);
+        return;
+      }
+
+      try {
+        const response = await api.get('/products', {
+          params: { q: trimmedQuery, page: 1, limit: 5, sort: 'newest' },
+        });
+        const payload = response?.data ?? response;
+        const products = Array.isArray(payload?.products) ? payload.products : [];
+        if (cancelled) return;
+        setSuggestions(
+          products.map((product) => ({
+            id: product?._id || product?.id,
+            name: product?.name || '',
+            image: product?.image || product?.images?.[0] || '',
+            price: Number(product?.price) || 0,
+          }))
+        );
+      } catch {
+        if (cancelled) return;
+        const fallback = getCatalogProducts()
+          .filter((product) =>
+            String(product?.name || '').toLowerCase().includes(trimmedQuery.toLowerCase())
+          )
+          .slice(0, 5);
+        setSuggestions(fallback);
+      }
+    };
+
+    fetchSuggestions();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, trimmedQuery]);
 
   return (
     <AnimatePresence>

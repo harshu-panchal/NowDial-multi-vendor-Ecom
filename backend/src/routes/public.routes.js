@@ -28,6 +28,52 @@ const toPublicVendor = (vendorDoc) => {
     };
 };
 
+const normalizeVariantPart = (value) => String(value || '').trim().toLowerCase();
+
+const toVariantPriceEntries = (variantPrices) => {
+    if (!variantPrices) return [];
+    if (variantPrices instanceof Map) return Array.from(variantPrices.entries());
+    if (typeof variantPrices === 'object') return Object.entries(variantPrices);
+    return [];
+};
+
+const resolveVariantPrice = (product, selectedVariant) => {
+    const basePrice = Number(product?.price);
+    if (!Number.isFinite(basePrice) || basePrice < 0) return 0;
+
+    const size = normalizeVariantPart(selectedVariant?.size);
+    const color = normalizeVariantPart(selectedVariant?.color);
+    const entries = toVariantPriceEntries(product?.variants?.prices);
+    if (!entries.length || (!size && !color)) return basePrice;
+
+    const candidateKeys = [
+        `${size}|${color}`,
+        `${size}-${color}`,
+        `${size}_${color}`,
+        `${size}:${color}`,
+        size && !color ? size : null,
+        color && !size ? color : null,
+    ].filter(Boolean);
+
+    for (const candidate of candidateKeys) {
+        const exact = entries.find(([rawKey]) => String(rawKey).trim() === candidate);
+        if (exact) {
+            const price = Number(exact[1]);
+            if (Number.isFinite(price) && price >= 0) return price;
+        }
+
+        const normalized = entries.find(
+            ([rawKey]) => normalizeVariantPart(rawKey) === normalizeVariantPart(candidate)
+        );
+        if (normalized) {
+            const price = Number(normalized[1]);
+            if (Number.isFinite(price) && price >= 0) return price;
+        }
+    }
+
+    return basePrice;
+};
+
 // GET /api/products — list with filters
 const listProducts = asyncHandler(async (req, res) => {
     const {
@@ -42,7 +88,8 @@ const listProducts = asyncHandler(async (req, res) => {
         flashSale,
         isNewArrival,
         minPrice,
-        maxPrice
+        maxPrice,
+        minRating
     } = req.query;
     const skip = (page - 1) * limit;
     const filter = { isActive: true };
@@ -58,6 +105,7 @@ const listProducts = asyncHandler(async (req, res) => {
     if (flashSale === 'true') filter.flashSale = true;
     if (isNewArrival === 'true') filter.isNewArrival = true;
     if (minPrice || maxPrice) filter.price = { ...(minPrice && { $gte: Number(minPrice) }), ...(maxPrice && { $lte: Number(maxPrice) }) };
+    if (minRating) filter.rating = { $gte: Number(minRating) };
     const searchQuery = String(search || q || '').trim();
     if (searchQuery) filter.$text = { $search: searchQuery };
 
@@ -247,7 +295,7 @@ router.post('/shipping/estimate', asyncHandler(async (req, res) => {
 
     const products = await Product.find({ _id: { $in: productIds }, isActive: true })
         .populate('vendorId', 'shippingEnabled defaultShippingRate freeShippingThreshold')
-        .select('_id vendorId price')
+        .select('_id vendorId price variants.prices')
         .lean();
 
     const productMap = new Map(products.map((product) => [String(product._id), product]));
@@ -259,7 +307,7 @@ router.post('/shipping/estimate', asyncHandler(async (req, res) => {
 
         const vendorId = String(product.vendorId._id || product.vendorId);
         const quantity = Math.max(1, Number(item?.quantity || 1));
-        const price = Math.max(0, Number(product.price || 0));
+        const price = Math.max(0, Number(resolveVariantPrice(product, item?.variant) || 0));
         const subtotal = price * quantity;
 
         if (!vendorMap[vendorId]) {
@@ -368,7 +416,7 @@ router.get('/campaigns/:slug', asyncHandler(async (req, res) => {
 // GET /api/orders/track/:id (public order tracking)
 router.get('/orders/track/:id', asyncHandler(async (req, res) => {
     const { default: Order } = await import('../models/Order.model.js');
-    const order = await Order.findOne({ orderId: req.params.id }).select('orderId status trackingNumber estimatedDelivery deliveredAt createdAt shippingAddress');
+    const order = await Order.findOne({ orderId: req.params.id }).select('orderId status trackingNumber estimatedDelivery deliveredAt createdAt updatedAt cancelledAt');
     if (!order) throw new ApiError(404, 'Order not found.');
     res.status(200).json(new ApiResponse(200, order, 'Order tracking info.'));
 }));

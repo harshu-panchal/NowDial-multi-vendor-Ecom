@@ -10,6 +10,7 @@ import {
 } from "react-icons/fi";
 import { motion, AnimatePresence } from "framer-motion";
 import { useCartStore, useUIStore } from "../../store/useStore";
+import { useAuthStore } from "../../store/authStore";
 import { formatPrice } from "../../utils/helpers";
 import { Link } from "react-router-dom";
 import SwipeableCartItem from "./SwipeableCartItem";
@@ -23,6 +24,7 @@ const CartDrawer = () => {
     clearCart,
     getItemsByVendor,
   } = useCartStore();
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const total = getTotal();
 
   // Group items by vendor
@@ -32,6 +34,12 @@ const CartDrawer = () => {
   );
 
   // Prevent body scroll when cart is open
+  useEffect(() => {
+    if (!isAuthenticated && items.length > 0) {
+      clearCart();
+    }
+  }, [isAuthenticated, items.length, clearCart]);
+
   useEffect(() => {
     if (isCartOpen) {
       document.body.style.overflowY = "hidden";

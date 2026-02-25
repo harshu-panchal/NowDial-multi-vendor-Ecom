@@ -7,7 +7,6 @@ import MobileOrderCard from '../components/Mobile/MobileOrderCard';
 import { useOrderStore } from '../../../shared/store/orderStore';
 import { useAuthStore } from '../../../shared/store/authStore';
 import PageTransition from '../../../shared/components/PageTransition';
-import ProtectedRoute from '../../../shared/components/Auth/ProtectedRoute';
 import usePullToRefresh from '../hooks/usePullToRefresh';
 import toast from 'react-hot-toast';
 
@@ -58,9 +57,8 @@ const MobileOrders = () => {
   } = usePullToRefresh(handleRefresh);
 
   return (
-    <ProtectedRoute>
-      <PageTransition>
-        <MobileLayout showBottomNav={true} showCartBar={true}>
+    <PageTransition>
+      <MobileLayout showBottomNav={true} showCartBar={true}>
           <div className="w-full pb-24">
             {/* Header */}
             <div className="px-4 py-4 bg-white border-b border-gray-200 sticky top-1 z-30">
@@ -155,9 +153,8 @@ const MobileOrders = () => {
               )}
             </div>
           </div>
-        </MobileLayout>
-      </PageTransition>
-    </ProtectedRoute>
+      </MobileLayout>
+    </PageTransition>
   );
 };
 

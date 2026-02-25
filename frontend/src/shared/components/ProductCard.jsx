@@ -23,8 +23,12 @@ const ProductCard = ({ product, hideRating = false, isFlashSale = false }) => {
     removeItem: removeFromWishlist,
     isInWishlist,
   } = useWishlistStore();
+  const hasNoVariant = (cartItem) =>
+    !cartItem?.variant?.size && !cartItem?.variant?.color;
   const isFavorite = isInWishlist(product.id);
-  const isInCart = items.some((item) => item.id === product.id);
+  const isInCart = items.some(
+    (item) => item.id === product.id && hasNoVariant(item)
+  );
   const [isAdding, setIsAdding] = useState(false);
   const [showLongPressMenu, setShowLongPressMenu] = useState(false);
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
@@ -88,6 +92,9 @@ const ProductCard = ({ product, hideRating = false, isFlashSale = false }) => {
       price: product.price,
       image: product.image,
       quantity: 1,
+      stockQuantity: product.stockQuantity,
+      vendorId: product.vendorId,
+      vendorName: product.vendorName,
     });
     if (!addedToCart) return;
     triggerCartAnimation();
@@ -99,7 +106,7 @@ const ProductCard = ({ product, hideRating = false, isFlashSale = false }) => {
       e.preventDefault();
       e.stopPropagation();
     }
-    removeItem(product.id);
+    removeItem(product.id, {});
     toast.success("Removed from cart!");
   };
 
