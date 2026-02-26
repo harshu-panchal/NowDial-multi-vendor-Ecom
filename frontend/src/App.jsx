@@ -429,10 +429,11 @@ const AppRoutes = () => {
         <Route index element={<Navigate to="/admin/dashboard" replace />} />
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="products" element={<Products />} />
-        <Route path="products/:id" element={<ProductForm />} />
+        <Route path="products/add-product" element={<ProductForm />} />
         <Route path="products/manage-products" element={<ManageProducts />} />
         <Route path="products/tax-pricing" element={<TaxPricing />} />
         <Route path="products/product-ratings" element={<ProductRatings />} />
+        <Route path="products/:id" element={<ProductForm />} />
         <Route path="more" element={<More />} />
         <Route path="categories" element={<Categories />} />
         <Route

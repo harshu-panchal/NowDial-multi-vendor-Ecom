@@ -569,7 +569,21 @@ const ProductFormModal = ({ isOpen, onClose, productId, onSuccess }) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    if (!formData.name || !formData.price || !formData.stockQuantity) {
+    const trimmedName = String(formData.name || "").trim();
+    const numericPrice = Number(formData.price);
+    const numericStockQuantity = Number(formData.stockQuantity);
+    const isPriceInvalid =
+      formData.price === "" ||
+      formData.price === null ||
+      Number.isNaN(numericPrice) ||
+      numericPrice < 0;
+    const isStockQuantityInvalid =
+      formData.stockQuantity === "" ||
+      formData.stockQuantity === null ||
+      Number.isNaN(numericStockQuantity) ||
+      numericStockQuantity < 0;
+
+    if (!trimmedName || isPriceInvalid || isStockQuantityInvalid) {
       toast.error("Please fill in all required fields");
       return;
     }
