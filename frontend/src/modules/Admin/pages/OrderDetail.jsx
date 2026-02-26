@@ -19,8 +19,11 @@ import { motion } from 'framer-motion';
 import Badge from '../../../shared/components/Badge';
 import AnimatedSelect from '../components/AnimatedSelect';
 import { formatCurrency, formatDateTime } from '../utils/adminHelpers';
+import { getPlaceholderImage } from '../../../shared/utils/helpers';
 import { getOrderById, updateOrderStatus } from '../services/adminService';
 import toast from 'react-hot-toast';
+
+const ORDER_PRODUCT_PLACEHOLDER = getPlaceholderImage(100, 100, 'Product');
 
 const OrderDetail = () => {
   const navigate = useNavigate();
@@ -118,7 +121,7 @@ const OrderDetail = () => {
     }
 
     // Return placeholder
-    return 'https://via.placeholder.com/100x100?text=Product';
+    return ORDER_PRODUCT_PLACEHOLDER;
   };
 
   return (
@@ -237,7 +240,8 @@ const OrderDetail = () => {
                       alt={item.name || 'Product'}
                       className="w-12 h-12 rounded-lg object-cover flex-shrink-0"
                       onError={(e) => {
-                        e.target.src = 'https://via.placeholder.com/100x100?text=Product';
+                        e.currentTarget.onerror = null;
+                        e.currentTarget.src = ORDER_PRODUCT_PLACEHOLDER;
                       }}
                     />
                     <div className="flex-1 min-w-0">

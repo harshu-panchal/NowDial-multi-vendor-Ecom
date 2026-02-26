@@ -1,6 +1,9 @@
 import { create } from 'zustand';
 import * as adminService from '../../modules/Admin/services/adminService';
 import toast from 'react-hot-toast';
+import { getPlaceholderImage } from '../utils/helpers';
+
+const PRODUCT_IMAGE_PLACEHOLDER = getPlaceholderImage(50, 50, 'Product');
 
 export const useProductStore = create((set, get) => ({
     products: [],
@@ -23,7 +26,7 @@ export const useProductStore = create((set, get) => ({
                 id: p._id,
                 stockQuantity: p.stockQuantity || 0,
                 price: p.price || 0,
-                image: p.images?.[0] || 'https://via.placeholder.com/50x50?text=Product'
+                image: p.image || p.images?.[0] || PRODUCT_IMAGE_PLACEHOLDER
             }));
 
             set({

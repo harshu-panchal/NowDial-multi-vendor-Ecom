@@ -3,8 +3,10 @@ import { FiPackage, FiAlertCircle, FiTrendingDown } from 'react-icons/fi';
 import { motion } from 'framer-motion';
 import DataTable from '../../components/DataTable';
 import ExportButton from '../../components/ExportButton';
-import { formatPrice } from '../../../../shared/utils/helpers';
+import { formatPrice, getPlaceholderImage } from '../../../../shared/utils/helpers';
 import * as adminService from '../../services/adminService';
+
+const PRODUCT_IMAGE_PLACEHOLDER = getPlaceholderImage(50, 50, 'Product');
 
 const InventoryReport = () => {
   const [products, setProducts] = useState([]);
@@ -39,7 +41,7 @@ const InventoryReport = () => {
               id: p._id || p.id,
               stockQuantity: p.stockQuantity || 0,
               price: p.price || 0,
-              image: p.image || p.images?.[0] || 'https://via.placeholder.com/50x50?text=Product',
+              image: p.image || p.images?.[0] || PRODUCT_IMAGE_PLACEHOLDER,
             }))
           );
         }
@@ -76,7 +78,8 @@ const InventoryReport = () => {
             alt={value}
             className="w-10 h-10 object-cover rounded-lg"
             onError={(e) => {
-              e.target.src = 'https://via.placeholder.com/50x50?text=Product';
+              e.currentTarget.onerror = null;
+              e.currentTarget.src = PRODUCT_IMAGE_PLACEHOLDER;
             }}
           />
           <span className="font-medium">{value}</span>

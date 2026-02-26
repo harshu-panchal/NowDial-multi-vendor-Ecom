@@ -7,12 +7,14 @@ import Badge from "../../../../shared/components/Badge";
 import ConfirmModal from "../../components/ConfirmModal";
 import ProductFormModal from "../../components/ProductFormModal";
 import AnimatedSelect from "../../components/AnimatedSelect";
-import { formatPrice } from "../../../../shared/utils/helpers";
+import { formatPrice, getPlaceholderImage } from "../../../../shared/utils/helpers";
 
 import { useCategoryStore } from "../../../../shared/store/categoryStore";
 import { useBrandStore } from "../../../../shared/store/brandStore";
 import { getAllProducts, deleteProduct } from "../../services/adminService";
 import toast from "react-hot-toast";
+
+const PRODUCT_IMAGE_PLACEHOLDER = getPlaceholderImage(50, 50, "Product");
 
 const ManageProducts = () => {
   const [products, setProducts] = useState([]);
@@ -57,7 +59,7 @@ const ManageProducts = () => {
       const normalizedProducts = products.map(p => ({
         ...p,
         id: p._id, // Map backend _id to frontend id
-        image: p.image || p.images?.[0] || "https://via.placeholder.com/50x50?text=Product",
+        image: p.image || p.images?.[0] || PRODUCT_IMAGE_PLACEHOLDER,
         stock: p.stock || (p.stockQuantity > 5 ? "in_stock" : p.stockQuantity > 0 ? "low_stock" : "out_of_stock"),
       }));
       setProducts(normalizedProducts);
@@ -111,7 +113,8 @@ const ManageProducts = () => {
             alt={value}
             className="w-10 h-10 object-cover rounded-lg"
             onError={(e) => {
-              e.target.src = "https://via.placeholder.com/50x50?text=Product";
+              e.currentTarget.onerror = null;
+              e.currentTarget.src = PRODUCT_IMAGE_PLACEHOLDER;
             }}
           />
           <span className="font-medium">{value}</span>

@@ -20,11 +20,13 @@ import { useCategoryStore } from "../../../../shared/store/categoryStore";
 import { useBrandStore } from "../../../../shared/store/brandStore";
 import { generateSlug } from "../../../../shared/store/campaignStore";
 import AnimatedSelect from "../AnimatedSelect";
-import { formatPrice } from "../../../../shared/utils/helpers";
+import { formatPrice, getPlaceholderImage } from "../../../../shared/utils/helpers";
 import toast from "react-hot-toast";
 import Button from "../Button";
 import { uploadAdminImage } from "../../services/adminService";
 import { getAllProducts } from "../../services/adminService";
+
+const CAMPAIGN_PRODUCT_PLACEHOLDER = getPlaceholderImage(48, 48, "Product");
 
 const CampaignForm = ({ campaign, onClose, onSave }) => {
   const location = useLocation();
@@ -889,8 +891,8 @@ const CampaignForm = ({ campaign, onClose, onSave }) => {
                               alt={product.name}
                               className="w-12 h-12 object-cover rounded-lg flex-shrink-0"
                               onError={(e) => {
-                                e.target.src =
-                                  "https://via.placeholder.com/48x48?text=Product";
+                                e.currentTarget.onerror = null;
+                                e.currentTarget.src = CAMPAIGN_PRODUCT_PLACEHOLDER;
                               }}
                             />
                             <div className="flex-1 min-w-0">

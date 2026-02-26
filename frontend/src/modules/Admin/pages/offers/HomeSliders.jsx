@@ -6,8 +6,11 @@ import DataTable from "../../components/DataTable";
 import ConfirmModal from "../../components/ConfirmModal";
 import AnimatedSelect from "../../components/AnimatedSelect";
 import { useBannerStore } from "../../../../shared/store/bannerStore";
+import { getPlaceholderImage } from "../../../../shared/utils/helpers";
 import toast from "react-hot-toast";
 import { uploadAdminImage } from "../../services/adminService";
+
+const SLIDER_IMAGE_PLACEHOLDER = getPlaceholderImage(64, 64, "Image");
 
 const HomeSliders = () => {
   const location = useLocation();
@@ -110,7 +113,8 @@ const HomeSliders = () => {
             alt={row.title}
             className="w-16 h-16 object-cover rounded-lg"
             onError={(e) => {
-              e.target.src = "https://via.placeholder.com/64x64?text=Image";
+              e.currentTarget.onerror = null;
+              e.currentTarget.src = SLIDER_IMAGE_PLACEHOLDER;
             }}
           />
           <span className="font-medium text-gray-800">{row.title}</span>
