@@ -214,8 +214,17 @@ export const getVendorProducts = asyncHandler(async (req, res) => {
     if (search) filter.$text = { $search: search };
     if (stock) filter.stock = stock;
 
-    const products = await Product.find(filter).populate('categoryId', 'name').populate('brandId', 'name').sort({ createdAt: -1 }).skip(skip).limit(numericLimit);
-    const total = await Product.countDocuments(filter);
+    const [products, total] = await Promise.all([
+        Product.find(filter)
+            .select('-faqs -relatedProducts -__v')
+            .populate('categoryId', 'name')
+            .populate('brandId', 'name')
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(numericLimit)
+            .lean(),
+        Product.countDocuments(filter),
+    ]);
     res.status(200).json(new ApiResponse(200, { products, total, page: numericPage, pages: Math.ceil(total / numericLimit) }, 'Products fetched.'));
 });
 
@@ -223,7 +232,8 @@ export const getVendorProducts = asyncHandler(async (req, res) => {
 export const getVendorProductById = asyncHandler(async (req, res) => {
     const product = await Product.findOne({ _id: req.params.id, vendorId: req.user.id })
         .populate('categoryId', 'name parentId')
-        .populate('brandId', 'name');
+        .populate('brandId', 'name')
+        .lean();
     if (!product) throw new ApiError(404, 'Product not found or access denied.');
     res.status(200).json(new ApiResponse(200, product, 'Product fetched.'));
 });

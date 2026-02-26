@@ -257,14 +257,18 @@ export const getAllProducts = asyncHandler(async (req, res) => {
         filter.isActive = { $ne: false };
     }
 
-    const products = await Product.find(filter)
-        .populate('vendorId', 'storeName')
-        .populate('categoryId', 'name')
-        .populate('brandId', 'name')
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(numericLimit);
-    const total = await Product.countDocuments(filter);
+    const [products, total] = await Promise.all([
+        Product.find(filter)
+            .select('-faqs -relatedProducts -__v')
+            .populate('vendorId', 'storeName')
+            .populate('categoryId', 'name')
+            .populate('brandId', 'name')
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(numericLimit)
+            .lean(),
+        Product.countDocuments(filter),
+    ]);
     res.status(200).json(new ApiResponse(200, { products, total, page: numericPage, pages: Math.ceil(total / numericLimit) }, 'Products fetched.'));
 });
 
@@ -273,7 +277,8 @@ export const getProductById = asyncHandler(async (req, res) => {
     const product = await Product.findById(req.params.id)
         .populate('vendorId', 'storeName')
         .populate('categoryId', 'name')
-        .populate('brandId', 'name');
+        .populate('brandId', 'name')
+        .lean();
 
     if (!product) throw new ApiError(404, 'Product not found.');
     res.status(200).json(new ApiResponse(200, product, 'Product fetched.'));

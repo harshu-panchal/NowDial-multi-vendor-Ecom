@@ -43,6 +43,10 @@ const campaignSchema = new mongoose.Schema(
     { timestamps: true }
 );
 
+campaignSchema.index({ isActive: 1, type: 1, createdAt: -1 });
+campaignSchema.index({ isActive: 1, startDate: 1, endDate: 1 });
+campaignSchema.index({ slug: 1, isActive: 1 });
+
 const Campaign = mongoose.model('Campaign', campaignSchema);
 export { Campaign };
 export default Campaign;

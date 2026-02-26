@@ -178,16 +178,17 @@ export const getFinancialSummary = asyncHandler(async (req, res) => {
 
 // GET /api/admin/analytics/inventory-stats
 export const getInventoryStats = asyncHandler(async (req, res) => {
-    const [totalProducts, outOfStock, lowStock] = await Promise.all([
+    const [totalProducts, outOfStock, lowStock, activeProducts] = await Promise.all([
         Product.countDocuments(),
         Product.countDocuments({ stock: 'out_of_stock' }),
-        Product.countDocuments({ stock: 'low_stock' })
+        Product.countDocuments({ stock: 'low_stock' }),
+        Product.countDocuments({ isActive: true }),
     ]);
 
     res.status(200).json(new ApiResponse(200, {
         totalProducts,
         outOfStock,
         lowStock,
-        activeProducts: await Product.countDocuments({ isActive: true })
+        activeProducts,
     }, 'Inventory stats fetched.'));
 });

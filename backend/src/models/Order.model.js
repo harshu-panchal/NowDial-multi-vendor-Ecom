@@ -98,6 +98,10 @@ orderSchema.index(
     }
 );
 
+orderSchema.index({ isDeleted: 1, createdAt: -1 });
+orderSchema.index({ isDeleted: 1, status: 1, createdAt: -1 });
+orderSchema.index({ 'vendorItems.vendorId': 1, createdAt: -1 });
+
 const Order = mongoose.model('Order', orderSchema);
 export { Order };
 export default Order;

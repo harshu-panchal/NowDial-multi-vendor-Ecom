@@ -63,6 +63,9 @@ const vendorSchema = new mongoose.Schema(
     { timestamps: true }
 );
 
+vendorSchema.index({ status: 1, rating: -1, reviewCount: -1, createdAt: -1 });
+vendorSchema.index({ status: 1, createdAt: -1 });
+
 vendorSchema.pre('save', async function (next) {
     if (!this.isModified('password')) return next();
     this.password = await bcrypt.hash(this.password, 12);

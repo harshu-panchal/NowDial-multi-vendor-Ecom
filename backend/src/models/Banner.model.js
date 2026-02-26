@@ -20,6 +20,9 @@ const bannerSchema = new mongoose.Schema(
     { timestamps: true }
 );
 
+bannerSchema.index({ isActive: 1, type: 1, order: 1 });
+bannerSchema.index({ isActive: 1, startDate: 1, endDate: 1 });
+
 const Banner = mongoose.model('Banner', bannerSchema);
 export { Banner };
 export default Banner;

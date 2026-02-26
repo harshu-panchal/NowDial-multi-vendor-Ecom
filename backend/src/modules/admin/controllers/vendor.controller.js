@@ -43,12 +43,15 @@ export const getAllVendors = asyncHandler(async (req, res) => {
         filter.$or = [{ name: safeRegex }, { email: safeRegex }, { storeName: safeRegex }];
     }
 
-    const vendors = await Vendor.find(filter)
-        .select('-password -otp -otpExpiry')
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(numericLimit);
-    const total = await Vendor.countDocuments(filter);
+    const [vendors, total] = await Promise.all([
+        Vendor.find(filter)
+            .select('-password -otp -otpExpiry')
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(numericLimit)
+            .lean(),
+        Vendor.countDocuments(filter),
+    ]);
     res.status(200).json(
         new ApiResponse(200, {
             vendors: vendors.map(toApiVendor),
@@ -61,7 +64,7 @@ export const getAllVendors = asyncHandler(async (req, res) => {
 
 // GET /api/admin/vendors/:id
 export const getVendorDetail = asyncHandler(async (req, res) => {
-    const vendor = await Vendor.findById(req.params.id).select('-password -otp -otpExpiry');
+    const vendor = await Vendor.findById(req.params.id).select('-password -otp -otpExpiry').lean();
     if (!vendor) throw new ApiError(404, 'Vendor not found.');
     res.status(200).json(new ApiResponse(200, toApiVendor(vendor), 'Vendor detail fetched.'));
 });

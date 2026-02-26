@@ -10,8 +10,14 @@ import Coupon from '../models/Coupon.model.js';
 import Banner from '../models/Banner.model.js';
 import Campaign from '../models/Campaign.model.js';
 import { calculateVendorShippingForGroups } from '../services/vendorShipping.service.js';
+import { cacheResponse } from '../middlewares/responseCache.js';
 
 const router = Router();
+const listCache = cacheResponse({ ttlSeconds: 30, maxEntries: 1000 });
+const detailCache = cacheResponse({ ttlSeconds: 60, maxEntries: 1000 });
+const catalogCache = cacheResponse({ ttlSeconds: 300, maxEntries: 200 });
+const marketingCache = cacheResponse({ ttlSeconds: 120, maxEntries: 300 });
+const PRODUCT_LIST_SELECT = '-faqs -relatedProducts -__v';
 
 const toPublicVendor = (vendorDoc) => {
     const vendor = typeof vendorDoc?.toObject === 'function'
@@ -105,12 +111,14 @@ const listProducts = asyncHandler(async (req, res) => {
         maxPrice,
         minRating
     } = req.query;
-    const skip = (page - 1) * limit;
+    const numericPage = Math.max(Number(page) || 1, 1);
+    const numericLimit = Math.max(Number(limit) || 12, 1);
+    const skip = (numericPage - 1) * numericLimit;
     const filter = { isActive: true };
 
     if (category) {
         const categoryId = String(category);
-        const childCategories = await Category.find({ parentId: categoryId }).select('_id');
+        const childCategories = await Category.find({ parentId: categoryId }).select('_id').lean();
         const categoryIds = [categoryId, ...childCategories.map((cat) => String(cat._id))];
         filter.categoryId = { $in: categoryIds };
     }
@@ -125,23 +133,37 @@ const listProducts = asyncHandler(async (req, res) => {
 
     const sortMap = { newest: { createdAt: -1 }, oldest: { createdAt: 1 }, 'price-asc': { price: 1 }, 'price-desc': { price: -1 }, popular: { reviewCount: -1 }, rating: { rating: -1 } };
 
-    const products = await Product.find(filter).populate('categoryId', 'name').populate('brandId', 'name').populate('vendorId', 'storeName').sort(sortMap[sort] || { createdAt: -1 }).skip(skip).limit(Number(limit));
-    const total = await Product.countDocuments(filter);
+    const [products, total] = await Promise.all([
+        Product.find(filter)
+            .select(PRODUCT_LIST_SELECT)
+            .populate('categoryId', 'name')
+            .populate('brandId', 'name')
+            .populate('vendorId', 'storeName')
+            .sort(sortMap[sort] || { createdAt: -1 })
+            .skip(skip)
+            .limit(numericLimit)
+            .lean(),
+        Product.countDocuments(filter),
+    ]);
 
-    res.status(200).json(new ApiResponse(200, { products, total, page: Number(page), pages: Math.ceil(total / limit) }, 'Products fetched.'));
+    res.status(200).json(new ApiResponse(200, { products, total, page: numericPage, pages: Math.ceil(total / numericLimit) }, 'Products fetched.'));
 });
 
-router.get('/', listProducts);
-router.get('/products', listProducts);
+router.get('/', listCache, listProducts);
+router.get('/products', listCache, listProducts);
 
 // GET /api/products/flash-sale
-router.get('/flash-sale', asyncHandler(async (req, res) => {
-    const products = await Product.find({ isActive: true, flashSale: true }).limit(20);
+router.get('/flash-sale', marketingCache, asyncHandler(async (req, res) => {
+    const products = await Product.find({ isActive: true, flashSale: true })
+        .select(PRODUCT_LIST_SELECT)
+        .sort({ createdAt: -1 })
+        .limit(20)
+        .lean();
     res.status(200).json(new ApiResponse(200, products, 'Flash sale products.'));
 }));
 
 // GET /api/products/new-arrivals
-router.get('/new-arrivals', asyncHandler(async (req, res) => {
+router.get('/new-arrivals', listCache, asyncHandler(async (req, res) => {
     const {
         page = 1,
         limit = 20,
@@ -181,12 +203,14 @@ router.get('/new-arrivals', asyncHandler(async (req, res) => {
 
     const [products, total] = await Promise.all([
         Product.find(filter)
+            .select(PRODUCT_LIST_SELECT)
             .populate('categoryId', 'name')
             .populate('brandId', 'name')
             .populate('vendorId', 'storeName')
             .sort(sortMap[sort] || sortMap.newest)
             .skip(skip)
-            .limit(numericLimit),
+            .limit(numericLimit)
+            .lean(),
         Product.countDocuments(filter),
     ]);
 
@@ -199,42 +223,56 @@ router.get('/new-arrivals', asyncHandler(async (req, res) => {
 }));
 
 // GET /api/products/popular
-router.get('/popular', asyncHandler(async (req, res) => {
-    const products = await Product.find({ isActive: true }).sort({ reviewCount: -1, rating: -1 }).limit(10);
+router.get('/popular', marketingCache, asyncHandler(async (req, res) => {
+    const products = await Product.find({ isActive: true })
+        .select(PRODUCT_LIST_SELECT)
+        .sort({ reviewCount: -1, rating: -1, createdAt: -1 })
+        .limit(10)
+        .lean();
     res.status(200).json(new ApiResponse(200, products, 'Popular products.'));
 }));
 
 // GET /api/products/similar/:id
-router.get('/similar/:id', asyncHandler(async (req, res) => {
-    const product = await Product.findById(req.params.id);
+router.get('/similar/:id', detailCache, asyncHandler(async (req, res) => {
+    const product = await Product.findById(req.params.id).select('_id categoryId').lean();
     if (!product) throw new ApiError(404, 'Product not found.');
-    const similar = await Product.find({ isActive: true, _id: { $ne: product._id }, categoryId: product.categoryId }).limit(6);
+    const similar = await Product.find({ isActive: true, _id: { $ne: product._id }, categoryId: product.categoryId })
+        .select(PRODUCT_LIST_SELECT)
+        .sort({ createdAt: -1 })
+        .limit(6)
+        .lean();
     res.status(200).json(new ApiResponse(200, similar, 'Similar products.'));
 }));
 
 const getProductDetail = asyncHandler(async (req, res) => {
-    const product = await Product.findById(req.params.id).populate('categoryId', 'name').populate('brandId', 'name').populate('vendorId', 'storeName storeLogo rating');
+    const product = await Product.findById(req.params.id)
+        .populate('categoryId', 'name')
+        .populate('brandId', 'name')
+        .populate('vendorId', 'storeName storeLogo rating')
+        .lean();
     if (!product) throw new ApiError(404, 'Product not found.');
     res.status(200).json(new ApiResponse(200, product, 'Product detail.'));
 });
 
 // GET /api/products/:id
-router.get('/products/:id', getProductDetail);
+router.get('/products/:id', detailCache, getProductDetail);
 
 // GET /api/categories (public)
-router.get('/categories/all', asyncHandler(async (req, res) => {
-    const categories = await Category.find({ isActive: true }).sort({ order: 1 });
+router.get('/categories/all', catalogCache, asyncHandler(async (req, res) => {
+    const categories = await Category.find({ isActive: true })
+        .sort({ order: 1, name: 1 })
+        .lean();
     res.status(200).json(new ApiResponse(200, categories, 'Categories fetched.'));
 }));
 
 // GET /api/brands (public)
-router.get('/brands/all', asyncHandler(async (req, res) => {
-    const brands = await Brand.find({ isActive: true }).sort({ name: 1 });
+router.get('/brands/all', catalogCache, asyncHandler(async (req, res) => {
+    const brands = await Brand.find({ isActive: true }).sort({ name: 1 }).lean();
     res.status(200).json(new ApiResponse(200, brands, 'Brands fetched.'));
 }));
 
 // GET /api/vendors/all (public)
-router.get('/vendors/all', asyncHandler(async (req, res) => {
+router.get('/vendors/all', detailCache, asyncHandler(async (req, res) => {
     const { status = 'approved', page = 1, limit = 50, search } = req.query;
     const numericPage = Math.max(parseInt(page, 10) || 1, 1);
     const numericLimit = Math.max(parseInt(limit, 10) || 50, 1);
@@ -251,12 +289,15 @@ router.get('/vendors/all', asyncHandler(async (req, res) => {
         filter.$or = [{ name: safeRegex }, { email: safeRegex }, { storeName: safeRegex }];
     }
 
-    const vendors = await Vendor.find(filter)
-        .select('-password -otp -otpExpiry')
-        .sort({ rating: -1, reviewCount: -1, createdAt: -1 })
-        .skip(skip)
-        .limit(numericLimit);
-    const total = await Vendor.countDocuments(filter);
+    const [vendors, total] = await Promise.all([
+        Vendor.find(filter)
+            .select('-password -otp -otpExpiry')
+            .sort({ rating: -1, reviewCount: -1, createdAt: -1 })
+            .skip(skip)
+            .limit(numericLimit)
+            .lean(),
+        Vendor.countDocuments(filter),
+    ]);
 
     res.status(200).json(new ApiResponse(200, {
         vendors: vendors.map(toPublicVendor),
@@ -267,17 +308,17 @@ router.get('/vendors/all', asyncHandler(async (req, res) => {
 }));
 
 // GET /api/vendors/:id (public)
-router.get('/vendors/:id', asyncHandler(async (req, res) => {
+router.get('/vendors/:id', detailCache, asyncHandler(async (req, res) => {
     const vendor = await Vendor.findOne({
         _id: req.params.id,
         status: 'approved',
-    }).select('-password -otp -otpExpiry');
+    }).select('-password -otp -otpExpiry').lean();
     if (!vendor) throw new ApiError(404, 'Vendor not found.');
     res.status(200).json(new ApiResponse(200, toPublicVendor(vendor), 'Vendor detail fetched.'));
 }));
 
 // GET /api/vendors/:id/products (public)
-router.get('/vendors/:id/products', asyncHandler(async (req, res) => {
+router.get('/vendors/:id/products', listCache, asyncHandler(async (req, res) => {
     const { page = 1, limit = 20, sort = 'newest' } = req.query;
     const numericPage = Math.max(parseInt(page, 10) || 1, 1);
     const numericLimit = Math.max(parseInt(limit, 10) || 20, 1);
@@ -295,18 +336,22 @@ router.get('/vendors/:id/products', asyncHandler(async (req, res) => {
     const vendor = await Vendor.findOne({
         _id: req.params.id,
         status: 'approved',
-    }).select('_id');
+    }).select('_id').lean();
     if (!vendor) throw new ApiError(404, 'Vendor not found.');
 
     const filter = { isActive: true, vendorId: req.params.id };
-    const products = await Product.find(filter)
-        .populate('categoryId', 'name')
-        .populate('brandId', 'name')
-        .populate('vendorId', 'storeName')
-        .sort(sortMap[sort] || { createdAt: -1 })
-        .skip(skip)
-        .limit(numericLimit);
-    const total = await Product.countDocuments(filter);
+    const [products, total] = await Promise.all([
+        Product.find(filter)
+            .select(PRODUCT_LIST_SELECT)
+            .populate('categoryId', 'name')
+            .populate('brandId', 'name')
+            .populate('vendorId', 'storeName')
+            .sort(sortMap[sort] || { createdAt: -1 })
+            .skip(skip)
+            .limit(numericLimit)
+            .lean(),
+        Product.countDocuments(filter),
+    ]);
 
     res.status(200).json(new ApiResponse(200, {
         products,
@@ -328,7 +373,7 @@ router.post('/coupons/validate', asyncHandler(async (req, res) => {
         throw new ApiError(400, 'Cart total must be a valid non-negative number.');
     }
 
-    const coupon = await Coupon.findOne({ code: rawCode.toUpperCase(), isActive: true });
+    const coupon = await Coupon.findOne({ code: rawCode.toUpperCase(), isActive: true }).lean();
     if (!coupon) throw new ApiError(400, 'Invalid coupon code.');
     if (coupon.startsAt && coupon.startsAt > Date.now()) throw new ApiError(400, 'Coupon is not active yet.');
     if (coupon.expiresAt && coupon.expiresAt < Date.now()) throw new ApiError(400, 'Coupon has expired.');
@@ -347,7 +392,7 @@ router.post('/coupons/validate', asyncHandler(async (req, res) => {
 }));
 
 // GET /api/coupons/available
-router.get('/coupons/available', asyncHandler(async (req, res) => {
+router.get('/coupons/available', marketingCache, asyncHandler(async (req, res) => {
     const now = new Date();
     const coupons = await Coupon.find({
         isActive: true,
@@ -428,7 +473,7 @@ router.post('/shipping/estimate', asyncHandler(async (req, res) => {
 }));
 
 // GET /api/banners
-router.get('/banners', asyncHandler(async (req, res) => {
+router.get('/banners', marketingCache, asyncHandler(async (req, res) => {
     const { type } = req.query;
     const now = new Date();
     const filter = {
@@ -439,12 +484,12 @@ router.get('/banners', asyncHandler(async (req, res) => {
         ]
     };
     if (type) filter.type = type;
-    const banners = await Banner.find(filter).sort({ order: 1 });
+    const banners = await Banner.find(filter).sort({ order: 1 }).lean();
     res.status(200).json(new ApiResponse(200, banners, 'Banners fetched.'));
 }));
 
 // GET /api/campaigns
-router.get('/campaigns', asyncHandler(async (req, res) => {
+router.get('/campaigns', marketingCache, asyncHandler(async (req, res) => {
     const { type, limit = 20 } = req.query;
     const parsedLimit = Math.max(parseInt(limit, 10) || 20, 1);
     const now = new Date();
@@ -461,17 +506,18 @@ router.get('/campaigns', asyncHandler(async (req, res) => {
     const campaigns = await Campaign.find(query)
         .select('name slug type route discountType discountValue startDate endDate bannerConfig')
         .sort({ createdAt: -1 })
-        .limit(parsedLimit);
+        .limit(parsedLimit)
+        .lean();
 
     res.status(200).json(new ApiResponse(200, campaigns, 'Campaigns fetched.'));
 }));
 
 // GET /api/campaigns/:slug
-router.get('/campaigns/:slug', asyncHandler(async (req, res) => {
+router.get('/campaigns/:slug', detailCache, asyncHandler(async (req, res) => {
     const slug = String(req.params.slug || '').trim().toLowerCase();
     if (!slug) throw new ApiError(400, 'Campaign slug is required.');
 
-    const campaign = await Campaign.findOne({ slug, isActive: true });
+    const campaign = await Campaign.findOne({ slug, isActive: true }).lean();
     if (!campaign) throw new ApiError(404, 'Campaign not found.');
 
     const now = new Date();
@@ -492,13 +538,15 @@ router.get('/campaigns/:slug', asyncHandler(async (req, res) => {
         _id: { $in: productIds },
         isActive: true
     })
+        .select(PRODUCT_LIST_SELECT)
         .populate('categoryId', 'name')
         .populate('brandId', 'name')
         .populate('vendorId', 'storeName')
-        .sort({ createdAt: -1 });
+        .sort({ createdAt: -1 })
+        .lean();
 
     const payload = {
-        ...campaign.toObject(),
+        ...campaign,
         id: String(campaign._id),
         products,
     };
@@ -507,14 +555,16 @@ router.get('/campaigns/:slug', asyncHandler(async (req, res) => {
 }));
 
 // GET /api/orders/track/:id (public order tracking)
-router.get('/orders/track/:id', asyncHandler(async (req, res) => {
+router.get('/orders/track/:id', detailCache, asyncHandler(async (req, res) => {
     const { default: Order } = await import('../models/Order.model.js');
-    const order = await Order.findOne({ orderId: req.params.id }).select('orderId status trackingNumber estimatedDelivery deliveredAt createdAt updatedAt cancelledAt');
+    const order = await Order.findOne({ orderId: req.params.id })
+        .select('orderId status trackingNumber estimatedDelivery deliveredAt createdAt updatedAt cancelledAt')
+        .lean();
     if (!order) throw new ApiError(404, 'Order not found.');
     res.status(200).json(new ApiResponse(200, order, 'Order tracking info.'));
 }));
 
 // Legacy support: GET /api/:id (only ObjectId-like values to avoid swallowing unknown routes)
-router.get('/:id([a-fA-F0-9]{24})', getProductDetail);
+router.get('/:id([a-fA-F0-9]{24})', detailCache, getProductDetail);
 
 export default router;
