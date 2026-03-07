@@ -18,6 +18,7 @@ const detailCache = cacheResponse({ ttlSeconds: 60, maxEntries: 1000 });
 const catalogCache = cacheResponse({ ttlSeconds: 300, maxEntries: 200 });
 const marketingCache = cacheResponse({ ttlSeconds: 120, maxEntries: 300 });
 const PRODUCT_LIST_SELECT = '-faqs -relatedProducts -__v';
+const EXCLUSIVE_SALE_CAMPAIGN_TYPES = ['flash_sale', 'daily_deal', 'special_offer', 'festival'];
 
 const toPublicVendor = (vendorDoc) => {
     const vendor = typeof vendorDoc?.toObject === 'function'
@@ -94,6 +95,44 @@ const resolveVariantPrice = (product, selectedVariant) => {
     return basePrice;
 };
 
+const activeCampaignWindowQuery = (now = new Date()) => ({
+    isActive: true,
+    $and: [
+        { $or: [{ startDate: null }, { startDate: { $exists: false } }, { startDate: { $lte: now } }] },
+        { $or: [{ endDate: null }, { endDate: { $exists: false } }, { endDate: { $gte: now } }] }
+    ]
+});
+
+const collectCampaignProductIds = (campaigns = []) => {
+    const idSet = new Set();
+    campaigns.forEach((campaign) => {
+        const ids = Array.isArray(campaign?.productIds) ? campaign.productIds : [];
+        ids.forEach((value) => {
+            const normalized = String(value || '').trim();
+            if (/^[a-fA-F0-9]{24}$/.test(normalized)) {
+                idSet.add(normalized);
+            }
+        });
+    });
+    return [...idSet];
+};
+
+const getActiveSaleProductIds = async (type = null) => {
+    const now = new Date();
+    const query = {
+        ...activeCampaignWindowQuery(now),
+        type: type
+            ? String(type || '').trim()
+            : { $in: EXCLUSIVE_SALE_CAMPAIGN_TYPES },
+    };
+
+    const campaigns = await Campaign.find(query)
+        .select('productIds')
+        .lean();
+
+    return collectCampaignProductIds(campaigns);
+};
+
 // GET /api/products — list with filters
 const listProducts = asyncHandler(async (req, res) => {
     const {
@@ -112,7 +151,7 @@ const listProducts = asyncHandler(async (req, res) => {
         minRating
     } = req.query;
     const numericPage = Math.max(Number(page) || 1, 1);
-    const numericLimit = Math.max(Number(limit) || 12, 1);
+    const numericLimit = Math.min(Math.max(Number(limit) || 12, 1), 100);
     const skip = (numericPage - 1) * numericLimit;
     const filter = { isActive: true };
 
@@ -130,6 +169,11 @@ const listProducts = asyncHandler(async (req, res) => {
     if (minRating) filter.rating = { $gte: Number(minRating) };
     const searchQuery = String(search || q || '').trim();
     if (searchQuery) filter.$text = { $search: searchQuery };
+
+    const activeSaleProductIds = await getActiveSaleProductIds();
+    if (activeSaleProductIds.length) {
+        filter._id = { $nin: activeSaleProductIds };
+    }
 
     const sortMap = { newest: { createdAt: -1 }, oldest: { createdAt: 1 }, 'price-asc': { price: 1 }, 'price-desc': { price: -1 }, popular: { reviewCount: -1 }, rating: { rating: -1 } };
 
@@ -154,7 +198,12 @@ router.get('/products', listCache, listProducts);
 
 // GET /api/products/flash-sale
 router.get('/flash-sale', marketingCache, asyncHandler(async (req, res) => {
-    const products = await Product.find({ isActive: true, flashSale: true })
+    const flashSaleProductIds = await getActiveSaleProductIds('flash_sale');
+    if (!flashSaleProductIds.length) {
+        return res.status(200).json(new ApiResponse(200, [], 'Flash sale products.'));
+    }
+
+    const products = await Product.find({ isActive: true, _id: { $in: flashSaleProductIds } })
         .select(PRODUCT_LIST_SELECT)
         .sort({ createdAt: -1 })
         .limit(20)
@@ -176,7 +225,7 @@ router.get('/new-arrivals', listCache, asyncHandler(async (req, res) => {
     } = req.query;
 
     const numericPage = Math.max(Number(page) || 1, 1);
-    const numericLimit = Math.max(Number(limit) || 20, 1);
+    const numericLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
     const skip = (numericPage - 1) * numericLimit;
 
     const filter = { isActive: true, isNewArrival: true };
@@ -190,6 +239,11 @@ router.get('/new-arrivals', listCache, asyncHandler(async (req, res) => {
     }
     if (minRating) {
         filter.rating = { $gte: Number(minRating) };
+    }
+
+    const activeSaleProductIds = await getActiveSaleProductIds();
+    if (activeSaleProductIds.length) {
+        filter._id = { $nin: activeSaleProductIds };
     }
 
     const sortMap = {
@@ -224,7 +278,13 @@ router.get('/new-arrivals', listCache, asyncHandler(async (req, res) => {
 
 // GET /api/products/popular
 router.get('/popular', marketingCache, asyncHandler(async (req, res) => {
-    const products = await Product.find({ isActive: true })
+    const activeSaleProductIds = await getActiveSaleProductIds();
+    const filter = { isActive: true };
+    if (activeSaleProductIds.length) {
+        filter._id = { $nin: activeSaleProductIds };
+    }
+
+    const products = await Product.find(filter)
         .select(PRODUCT_LIST_SELECT)
         .sort({ reviewCount: -1, rating: -1, createdAt: -1 })
         .limit(10)
@@ -236,7 +296,12 @@ router.get('/popular', marketingCache, asyncHandler(async (req, res) => {
 router.get('/similar/:id', detailCache, asyncHandler(async (req, res) => {
     const product = await Product.findById(req.params.id).select('_id categoryId').lean();
     if (!product) throw new ApiError(404, 'Product not found.');
-    const similar = await Product.find({ isActive: true, _id: { $ne: product._id }, categoryId: product.categoryId })
+    const activeSaleProductIds = await getActiveSaleProductIds();
+    const similarFilter = { isActive: true, _id: { $ne: product._id }, categoryId: product.categoryId };
+    if (activeSaleProductIds.length) {
+        similarFilter._id = { $nin: [String(product._id), ...activeSaleProductIds] };
+    }
+    const similar = await Product.find(similarFilter)
         .select(PRODUCT_LIST_SELECT)
         .sort({ createdAt: -1 })
         .limit(6)
@@ -321,7 +386,7 @@ router.get('/vendors/:id', detailCache, asyncHandler(async (req, res) => {
 router.get('/vendors/:id/products', listCache, asyncHandler(async (req, res) => {
     const { page = 1, limit = 20, sort = 'newest' } = req.query;
     const numericPage = Math.max(parseInt(page, 10) || 1, 1);
-    const numericLimit = Math.max(parseInt(limit, 10) || 20, 1);
+    const numericLimit = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 100);
     const skip = (numericPage - 1) * numericLimit;
 
     const sortMap = {
@@ -339,7 +404,11 @@ router.get('/vendors/:id/products', listCache, asyncHandler(async (req, res) => 
     }).select('_id').lean();
     if (!vendor) throw new ApiError(404, 'Vendor not found.');
 
+    const activeSaleProductIds = await getActiveSaleProductIds();
     const filter = { isActive: true, vendorId: req.params.id };
+    if (activeSaleProductIds.length) {
+        filter._id = { $nin: activeSaleProductIds };
+    }
     const [products, total] = await Promise.all([
         Product.find(filter)
             .select(PRODUCT_LIST_SELECT)
@@ -528,11 +597,18 @@ router.get('/campaigns/:slug', detailCache, asyncHandler(async (req, res) => {
         throw new ApiError(404, 'Campaign has ended.');
     }
 
-    const productIds = Array.isArray(campaign.productIds)
+    let productIds = Array.isArray(campaign.productIds)
         ? campaign.productIds
             .map((value) => String(value || '').trim())
             .filter((value) => value && /^[a-fA-F0-9]{24}$/.test(value))
         : [];
+    if (EXCLUSIVE_SALE_CAMPAIGN_TYPES.includes(String(campaign.type || '').trim())) {
+        const activeSaleProductIds = await getActiveSaleProductIds();
+        if (activeSaleProductIds.length) {
+            const activeSaleSet = new Set(activeSaleProductIds);
+            productIds = productIds.filter((id) => activeSaleSet.has(id));
+        }
+    }
 
     const products = await Product.find({
         _id: { $in: productIds },

@@ -78,19 +78,11 @@ const MobileOffers = () => {
 
     const loadLiveOffers = async () => {
       try {
-        const campaignListResponses = await Promise.allSettled([
-          api.get("/campaigns", { params: { type: "festival", limit: 10 } }),
-          api.get("/campaigns", { params: { type: "special_offer", limit: 10 } }),
-          api.get("/campaigns", { params: { type: "daily_deal", limit: 10 } }),
-          api.get("/campaigns", { params: { type: "flash_sale", limit: 10 } }),
-        ]);
-
-        const campaignSlugs = campaignListResponses
-          .filter((item) => item.status === "fulfilled")
-          .flatMap((item) => {
-            const payload = item.value?.data ?? item.value;
-            return Array.isArray(payload) ? payload : [];
-          })
+        const campaignListResponse = await api.get("/campaigns", {
+          params: { type: "special_offer", limit: 20 },
+        });
+        const campaignsPayload = campaignListResponse?.data ?? campaignListResponse;
+        const campaignSlugs = (Array.isArray(campaignsPayload) ? campaignsPayload : [])
           .map((campaign) => String(campaign?.slug || "").trim())
           .filter(Boolean);
 

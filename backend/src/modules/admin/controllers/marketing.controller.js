@@ -7,6 +7,8 @@ import Campaign from '../../../models/Campaign.model.js';
 import { slugify } from '../../../utils/slugify.js';
 
 const COUPON_TYPES = new Set(['percentage', 'fixed', 'freeship']);
+const EXCLUSIVE_SALE_CAMPAIGN_TYPES = ['flash_sale', 'daily_deal', 'special_offer', 'festival'];
+const EXCLUSIVE_SALE_CAMPAIGN_TYPE_SET = new Set(EXCLUSIVE_SALE_CAMPAIGN_TYPES);
 
 const toFiniteNumber = (value) => {
     const num = Number(value);
@@ -69,6 +71,85 @@ const normalizeObjectIdList = (values) => {
     return values
         .map((value) => String(value || '').trim())
         .filter((value) => value.length > 0);
+};
+
+const enforceExclusiveSaleProducts = async ({
+    campaignId = null,
+    campaignType,
+    productIds = [],
+}) => {
+    const normalizedProductIds = normalizeObjectIdList(productIds);
+    if (!EXCLUSIVE_SALE_CAMPAIGN_TYPE_SET.has(String(campaignType || '').trim())) {
+        return {
+            normalizedProductIds,
+            movedProducts: [],
+        };
+    }
+    if (!normalizedProductIds.length) {
+        return {
+            normalizedProductIds,
+            movedProducts: [],
+        };
+    }
+
+    const otherCampaignFilter = {
+        type: { $in: EXCLUSIVE_SALE_CAMPAIGN_TYPES },
+        productIds: { $in: normalizedProductIds },
+    };
+    if (campaignId) {
+        otherCampaignFilter._id = { $ne: campaignId };
+    }
+
+    const otherCampaigns = await Campaign.find(otherCampaignFilter)
+        .select('_id name type productIds')
+        .lean();
+
+    if (!otherCampaigns.length) {
+        return {
+            normalizedProductIds,
+            movedProducts: [],
+        };
+    }
+
+    const movedProducts = [];
+    const bulkUpdates = [];
+
+    otherCampaigns.forEach((otherCampaign) => {
+        const originalIds = Array.isArray(otherCampaign.productIds)
+            ? otherCampaign.productIds.map((value) => String(value || '').trim()).filter(Boolean)
+            : [];
+
+        const productIdSetToMove = new Set(
+            originalIds.filter((value) => normalizedProductIds.includes(value))
+        );
+        if (!productIdSetToMove.size) return;
+
+        const nextProductIds = originalIds.filter((value) => !productIdSetToMove.has(value));
+        bulkUpdates.push({
+            updateOne: {
+                filter: { _id: otherCampaign._id },
+                update: { $set: { productIds: nextProductIds } },
+            },
+        });
+
+        productIdSetToMove.forEach((productId) => {
+            movedProducts.push({
+                productId,
+                fromCampaignId: String(otherCampaign._id),
+                fromCampaignName: String(otherCampaign.name || '').trim(),
+                fromCampaignType: String(otherCampaign.type || '').trim(),
+            });
+        });
+    });
+
+    if (bulkUpdates.length) {
+        await Campaign.bulkWrite(bulkUpdates, { ordered: false });
+    }
+
+    return {
+        normalizedProductIds,
+        movedProducts,
+    };
 };
 
 const ensureUniqueCampaignSlug = async (baseNameOrSlug, excludeId = null) => {
@@ -421,11 +502,20 @@ export const createCampaign = asyncHandler(async (req, res) => {
     const slugSource = payload.slug || payload.name;
     payload.slug = await ensureUniqueCampaignSlug(slugSource);
     payload.route = `/sale/${payload.slug}`;
-    payload.productIds = normalizeObjectIdList(payload.productIds);
+    const exclusivityResult = await enforceExclusiveSaleProducts({
+        campaignType: payload.type,
+        productIds: payload.productIds,
+    });
+    payload.productIds = exclusivityResult.normalizedProductIds;
 
     const campaign = await Campaign.create(payload);
     await syncCampaignBanner(campaign);
-    return res.status(201).json(new ApiResponse(201, campaign, 'Campaign created successfully'));
+    const campaignResponse = campaign.toObject ? campaign.toObject() : campaign;
+    campaignResponse._reassignment = {
+        movedCount: exclusivityResult.movedProducts.length,
+        movedProducts: exclusivityResult.movedProducts,
+    };
+    return res.status(201).json(new ApiResponse(201, campaignResponse, 'Campaign created successfully'));
 });
 
 export const updateCampaign = asyncHandler(async (req, res) => {
@@ -438,8 +528,16 @@ export const updateCampaign = asyncHandler(async (req, res) => {
         payload.slug = await ensureUniqueCampaignSlug(slugSource, existing._id);
     }
     payload.route = `/sale/${payload.slug || existing.slug}`;
-    if (payload.productIds !== undefined) {
-        payload.productIds = normalizeObjectIdList(payload.productIds);
+    const effectiveType = payload.type !== undefined ? payload.type : existing.type;
+    const effectiveProductIds =
+        payload.productIds !== undefined ? payload.productIds : existing.productIds;
+    const exclusivityResult = await enforceExclusiveSaleProducts({
+        campaignId: String(existing._id),
+        campaignType: effectiveType,
+        productIds: effectiveProductIds,
+    });
+    if (payload.productIds !== undefined || payload.type !== undefined) {
+        payload.productIds = exclusivityResult.normalizedProductIds;
     }
 
     const campaign = await Campaign.findByIdAndUpdate(req.params.id, payload, { new: true });
@@ -451,7 +549,13 @@ export const updateCampaign = asyncHandler(async (req, res) => {
         await deactivateCampaignBannersByRoutes([existing.route, campaign.route]);
     }
 
-    return res.status(200).json(new ApiResponse(200, campaign, 'Campaign updated successfully'));
+    const campaignResponse = campaign.toObject ? campaign.toObject() : campaign;
+    campaignResponse._reassignment = {
+        movedCount: exclusivityResult.movedProducts.length,
+        movedProducts: exclusivityResult.movedProducts,
+    };
+
+    return res.status(200).json(new ApiResponse(200, campaignResponse, 'Campaign updated successfully'));
 });
 
 export const deleteCampaign = asyncHandler(async (req, res) => {

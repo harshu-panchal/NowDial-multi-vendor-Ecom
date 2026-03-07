@@ -2,6 +2,21 @@ import { create } from 'zustand';
 import * as adminService from '../../modules/Admin/services/adminService';
 import toast from 'react-hot-toast';
 
+const getReassignmentMeta = (campaign) => {
+  const movedCount = Number(campaign?._reassignment?.movedCount || 0);
+  if (!Number.isFinite(movedCount) || movedCount <= 0) return null;
+
+  const movedProducts = Array.isArray(campaign?._reassignment?.movedProducts)
+    ? campaign._reassignment.movedProducts
+    : [];
+  const movedTypes = [...new Set(
+    movedProducts
+      .map((item) => String(item?.fromCampaignType || '').trim())
+      .filter(Boolean)
+  )];
+  return { movedCount, movedTypes };
+};
+
 export const useCampaignStore = create((set, get) => ({
   campaigns: [],
   isLoading: false,
@@ -25,11 +40,19 @@ export const useCampaignStore = create((set, get) => ({
     set({ isLoading: true });
     try {
       const response = await adminService.createCampaign(campaignData);
+      const reassignment = getReassignmentMeta(response?.data);
       set(state => ({
         campaigns: [...state.campaigns, response.data],
         isLoading: false
       }));
-      toast.success('Campaign created successfully');
+      if (reassignment) {
+        const fromText = reassignment.movedTypes.length
+          ? ` from ${reassignment.movedTypes.join(', ')}`
+          : '';
+        toast.success(`${reassignment.movedCount} product(s) moved${fromText}. Latest-added wins.`);
+      } else {
+        toast.success('Campaign created successfully');
+      }
       return response.data;
     } catch (error) {
       set({ isLoading: false });
@@ -42,11 +65,19 @@ export const useCampaignStore = create((set, get) => ({
     set({ isLoading: true });
     try {
       const response = await adminService.updateCampaign(id, campaignData);
+      const reassignment = getReassignmentMeta(response?.data);
       set(state => ({
         campaigns: state.campaigns.map(c => c._id === id ? response.data : c),
         isLoading: false
       }));
-      toast.success('Campaign updated successfully');
+      if (reassignment) {
+        const fromText = reassignment.movedTypes.length
+          ? ` from ${reassignment.movedTypes.join(', ')}`
+          : '';
+        toast.success(`${reassignment.movedCount} product(s) moved${fromText}. Latest-added wins.`);
+      } else {
+        toast.success('Campaign updated successfully');
+      }
       return response.data;
     } catch (error) {
       set({ isLoading: false });
