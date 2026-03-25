@@ -13,6 +13,8 @@ import { formatPrice } from "../../../shared/utils/helpers";
 import toast from "react-hot-toast";
 import { useCategoryStore } from "../../../shared/store/categoryStore";
 
+const OFFER_CAMPAIGN_TYPES = ["special_offer", "festival"];
+
 const normalizeProduct = (raw) => {
   const vendorObj =
     raw?.vendorId && typeof raw.vendorId === "object" ? raw.vendorId : null;
@@ -78,13 +80,23 @@ const MobileOffers = () => {
 
     const loadLiveOffers = async () => {
       try {
-        const campaignListResponse = await api.get("/campaigns", {
-          params: { type: "special_offer", limit: 20 },
-        });
-        const campaignsPayload = campaignListResponse?.data ?? campaignListResponse;
-        const campaignSlugs = (Array.isArray(campaignsPayload) ? campaignsPayload : [])
-          .map((campaign) => String(campaign?.slug || "").trim())
-          .filter(Boolean);
+        const campaignListResponses = await Promise.allSettled(
+          OFFER_CAMPAIGN_TYPES.map((type) =>
+            api.get("/campaigns", {
+              params: { type, limit: 20 },
+            })
+          )
+        );
+
+        const campaignSlugs = campaignListResponses
+          .filter((result) => result.status === "fulfilled")
+          .flatMap((result) => {
+            const campaignsPayload = result.value?.data ?? result.value;
+            const campaigns = Array.isArray(campaignsPayload) ? campaignsPayload : [];
+            return campaigns
+              .map((campaign) => String(campaign?.slug || "").trim())
+              .filter(Boolean);
+          });
 
         const uniqueSlugs = [...new Set(campaignSlugs)].slice(0, 20);
         if (!uniqueSlugs.length) {
